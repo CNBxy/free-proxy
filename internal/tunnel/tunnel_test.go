@@ -53,12 +53,33 @@ func TestFailureCodeClassification(t *testing.T) {
 		// --route-nopull and rejects these) must NOT be a config failure.
 		{"Options error: option 'redirect-gateway' cannot be used in this context ([PUSH-OPTIONS])", domain.FailUnknown},
 		{"Options error: option 'dhcp-option' cannot be used in this context ([PUSH-OPTIONS])", domain.FailUnknown},
+		// OpenVPN prints this generic sign-off after almost any unrecoverable
+		// exit, not only a bad option; on its own it carries no config signal.
+		{"Exiting due to fatal error", domain.FailUnknown},
 		{"something totally unrelated", domain.FailUnknown},
 	}
 	for _, c := range cases {
 		if got := FailureCode([]string{c.line}); got != c.want {
 			t.Errorf("FailureCode(%q) = %s, want %s", c.line, got, c.want)
 		}
+	}
+}
+
+// A node that times out reaching its remote must be classified as a timeout,
+// not a config error, even though OpenVPN's generic "Exiting due to fatal
+// error" sign-off appears in the same log. Misclassifying it as FailConfigError
+// marked a healthy node unavailable for a fault that was never the node's or
+// the config's (observed live: a fixed node hit EHOSTUNREACH, timed out, and
+// was blacklisted over a bogus "invalid option" diagnosis).
+func TestFailureCodeTimeoutNotConfigError(t *testing.T) {
+	lines := []string{
+		"read UDPv4 [EHOSTUNREACH]: No route to host (fd=3,code=113)",
+		"Server poll timeout, restarting",
+		"All connections have been connect-retry-max (1) times unsuccessful, exiting",
+		"Exiting due to fatal error",
+	}
+	if got := FailureCode(lines); got != domain.FailTimeout {
+		t.Errorf("FailureCode(timeout+generic fatal error) = %s, want %s", got, domain.FailTimeout)
 	}
 }
 

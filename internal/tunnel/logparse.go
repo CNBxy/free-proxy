@@ -60,6 +60,15 @@ func FailureCode(lines []string) domain.TunnelFailureCode {
 // intentionally rejects pushed dhcp-option/redirect-gateway directives, logs
 // this line, and proceeds to a successful handshake. Classifying those as fatal
 // (and therefore terminal) aborts every connection one step before completion.
+//
+// It also does not match on the bare phrase "fatal error": OpenVPN prints
+// "Exiting due to fatal error" as a generic sign-off after almost any
+// unrecoverable exit — a timeout, an unreachable host, a rejected auth — not
+// only after a bad option. Matching that phrase misattributed unrelated
+// terminal failures to the config-error code, which marked healthy nodes
+// unavailable for a fault that was never theirs. The "options error" /
+// "unrecognized option" patterns below already name the option explicitly and
+// are the actual signal for a bad config.
 func hasFatalConfigError(lines []string) bool {
 	for _, ln := range lines {
 		l := strings.ToLower(ln)
@@ -68,8 +77,7 @@ func hasFatalConfigError(lines []string) bool {
 		}
 		if strings.Contains(l, "options error") ||
 			strings.Contains(l, "option error") ||
-			strings.Contains(l, "unrecognized option") ||
-			strings.Contains(l, "fatal error") {
+			strings.Contains(l, "unrecognized option") {
 			return true
 		}
 	}
