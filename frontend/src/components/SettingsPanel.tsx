@@ -67,6 +67,9 @@ export function SettingsPanel({ settings, onChanged }: { settings: ProxySettings
               <option value="speed_first">速度优先</option>
               <option value="smart">智能（综合）</option>
               <option value="residential_first">住宅优先</option>
+              <option value="residential_least_users">住宅 · 使用人数最少</option>
+              <option value="mobile_least_users">移动 · 使用人数最少</option>
+              <option value="hosting_least_users">机房 · 使用人数最少</option>
               <option value="country">指定国家</option>
               <option value="fixed">固定节点</option>
               <option value="favorites">仅收藏</option>
@@ -102,7 +105,9 @@ export function SettingsPanel({ settings, onChanged }: { settings: ProxySettings
           </label>
         </div>
         <p className="text-xs text-ink-3 mt-4">
-          延迟优先选择响应最快的节点；速度优先选择来源标注带宽最高的节点；智能策略综合延迟（40%）、速度（40%）和 VPN Gate 会话数（20%，越少越好）。手动切换节点后会自动锁定为固定节点，避免后台自动切回其他节点。
+          延迟优先选择响应最快的节点；速度优先选择来源标注带宽最高的节点；智能策略综合延迟（40%）、速度（40%）和 VPN Gate 会话数（20%，越少越好）。
+          「使用人数最少」策略在住宅 / 移动 / 机房某一类可用节点中选择当前使用人数最少的出口：节点失效时立即切换到该类中使用人数最少的节点，并且每 5
+          分钟复查一次，若当前出口不再是人数最少的节点则自动切换。手动切换节点后会自动锁定为固定节点，避免后台自动切回其他节点。
           收藏节点数：{form.favorite_node_ids.length}。修改策略后系统会自动校验当前出口是否仍符合规则。
         </p>
       </Card>

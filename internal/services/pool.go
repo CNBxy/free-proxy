@@ -87,6 +87,9 @@ func ApplyFilters(nodes []domain.ProxyNodeRead, settings domain.ProxySettings, i
 	for _, id := range settings.FavoriteNodeIDs {
 		favorites[id] = true
 	}
+	// A least-users mode implies its own exact IP class, so the coarser
+	// RoutingIPType filter must not also apply and shrink the candidate set.
+	leastUsersType, leastUsers := LeastUsersIPType(settings.RoutingMode)
 	for _, n := range nodes {
 		switch settings.RoutingMode {
 		case domain.PolicyFixed:
@@ -102,21 +105,47 @@ func ApplyFilters(nodes []domain.ProxyNodeRead, settings domain.ProxySettings, i
 			if !favorites[n.ID] {
 				continue
 			}
-		}
-		switch settings.RoutingIPType {
-		case domain.RoutingResidential:
-			if !(n.IPType == domain.IpResidential || n.IPType == domain.IpMobile ||
-				(includeUnknownIPType && n.IPType == domain.IpUnknown)) {
+		default:
+			if leastUsers && n.IPType != leastUsersType {
 				continue
 			}
-		case domain.RoutingHosting:
-			if !(n.IPType == domain.IpHosting || (includeUnknownIPType && n.IPType == domain.IpUnknown)) {
-				continue
+		}
+		if !leastUsers {
+			switch settings.RoutingIPType {
+			case domain.RoutingResidential:
+				if !(n.IPType == domain.IpResidential || n.IPType == domain.IpMobile ||
+					(includeUnknownIPType && n.IPType == domain.IpUnknown)) {
+					continue
+				}
+			case domain.RoutingHosting:
+				if !(n.IPType == domain.IpHosting || (includeUnknownIPType && n.IPType == domain.IpUnknown)) {
+					continue
+				}
 			}
 		}
 		out = append(out, n)
 	}
 	return out
+}
+
+// IsLeastUsersMode reports whether mode is one of the least-users policies.
+func IsLeastUsersMode(mode domain.ProxyPolicyMode) bool {
+	_, ok := LeastUsersIPType(mode)
+	return ok
+}
+
+// LeastUsersIPType maps a least-users policy to the exact IP class it selects
+// for; ok is false for every other routing mode.
+func LeastUsersIPType(mode domain.ProxyPolicyMode) (domain.IpType, bool) {
+	switch mode {
+	case domain.PolicyResidentialLeastUsers:
+		return domain.IpResidential, true
+	case domain.PolicyMobileLeastUsers:
+		return domain.IpMobile, true
+	case domain.PolicyHostingLeastUsers:
+		return domain.IpHosting, true
+	}
+	return "", false
 }
 
 // SortCandidates orders nodes by the effective selection key for settings.
@@ -214,6 +243,21 @@ func effSpeed(n domain.ProxyNodeRead) int64 {
 }
 
 func lessFor(a, b domain.ProxyNodeRead, settings domain.ProxySettings) bool {
+	if _, leastUsers := LeastUsersIPType(settings.RoutingMode); leastUsers {
+		// 使用人数 (source sessions) is the primary key: the least-used node of
+		// the policy's IP class wins. Latency breaks ties so a fresh pool with
+		// all-zero session counts still picks a responsive exit.
+		if a.SourceSessions != b.SourceSessions {
+			return a.SourceSessions < b.SourceSessions
+		}
+		if la, lb := effLatency(a), effLatency(b); la != lb {
+			return la < lb
+		}
+		if a.SourceScore != b.SourceScore {
+			return a.SourceScore > b.SourceScore
+		}
+		return a.SourceSpeedBPS > b.SourceSpeedBPS
+	}
 	if settings.RoutingMode == domain.PolicySpeedFirst {
 		if sa, sb := effSpeed(a), effSpeed(b); sa != sb {
 			return sa > sb

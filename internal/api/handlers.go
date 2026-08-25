@@ -475,6 +475,7 @@ func (h *Handlers) SystemStatus(c *echo.Context) error {
 		"active_latency": monitorPayload(&h.Deps.ActiveLatencyMon.State),
 		"health":         monitorPayload(&h.Deps.HealthMon.State),
 		"liveness":       monitorPayload(&h.Deps.LivenessMon.State),
+		"least_users":    monitorPayload(&h.Deps.LeastUsersMon.State),
 	}
 	running := map[string]any{}
 	for k, v := range monitors {

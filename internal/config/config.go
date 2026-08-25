@@ -80,7 +80,11 @@ type Config struct {
 	ActivePingIntervalSecs   float64 `env:"ACTIVE_PING_INTERVAL_SECONDS" envDefault:"10"`
 	MaintenanceIntervalSecs  float64 `env:"MAINTENANCE_INTERVAL_SECONDS" envDefault:"10800"`
 	DisconnectedRetrySecs    float64 `env:"DISCONNECTED_RETRY_SECONDS" envDefault:"30"`
-	MaintenanceEnabled       bool    `env:"MAINTENANCE_ENABLED" envDefault:"true"`
+	// LeastUsersCheckIntervalSecs is how often the least-users routing modes
+	// re-check that the active exit is still the least-used node of its IP
+	// class (default: every 5 minutes).
+	LeastUsersCheckIntervalSecs float64 `env:"LEAST_USERS_CHECK_INTERVAL_SECONDS" envDefault:"300"`
+	MaintenanceEnabled          bool    `env:"MAINTENANCE_ENABLED" envDefault:"true"`
 	InitialConnectTestLimit  int     `env:"INITIAL_CONNECT_TEST_LIMIT" envDefault:"10"`
 	ManualTestNodeLimit      int     `env:"MANUAL_TEST_NODE_LIMIT" envDefault:"5"`
 	InvalidBackoffSeconds    int     `env:"INVALID_BACKOFF_SECONDS" envDefault:"1800"`
@@ -248,6 +252,9 @@ func (c *Config) HealthCheckInterval() time.Duration  { return secs(c.HealthChec
 func (c *Config) ActivePingInterval() time.Duration   { return secs(c.ActivePingIntervalSecs) }
 func (c *Config) MaintenanceInterval() time.Duration  { return secs(c.MaintenanceIntervalSecs) }
 func (c *Config) DisconnectedRetry() time.Duration    { return secs(c.DisconnectedRetrySecs) }
+func (c *Config) LeastUsersCheckInterval() time.Duration {
+	return secs(c.LeastUsersCheckIntervalSecs)
+}
 func (c *Config) RoutingRetryInterval() time.Duration { return secs(c.RoutingRetryIntervalSecs) }
 func (c *Config) IPInfoCacheTTL() time.Duration       { return secs(float64(c.IPInfoCacheSeconds)) }
 func (c *Config) InvalidBackoff() time.Duration       { return secs(float64(c.InvalidBackoffSeconds)) }

@@ -100,6 +100,7 @@ func buildDeps(ctx context.Context, cfg *config.Config, repos *store.Repos, auth
 		ActiveLatencyMon: services.NewActiveLatencyMonitor(cfg, repos.Nodes, gateway, runner),
 		HealthMon:        services.NewHealthMonitor(cfg, health, gateway),
 		LivenessMon:      services.NewLivenessMonitor(liveness),
+		LeastUsersMon:    services.NewLeastUsersMonitor(cfg, repos.Nodes, repos.Settings, gateway),
 	}
 }
 
@@ -151,6 +152,9 @@ func runServe(ctx context.Context, cfg *config.Config, hostOverride string, port
 
 	go deps.HealthMon.Run(ctx)
 	go deps.ActiveLatencyMon.Run(ctx)
+	// Re-balance the exit toward the least-used node for the least-users
+	// routing modes; a no-op for every other mode.
+	go deps.LeastUsersMon.Run(ctx)
 	// The sweep is pool upkeep, so it rides the existing maintenance switch:
 	// turning maintenance off already means "stop working the pool in the
 	// background", and that should silence the dialling too.
