@@ -25,8 +25,8 @@ func (r *AppSettingsRepository) Get(ctx context.Context) (domain.AppSettings, er
 	var out domain.AppSettings
 	var adminExternal, proxyEnabled, proxyExternal, maintenanceEnabled int64
 	var dnsRepair, strictRPF int64
-	err := r.db.QueryRowContext(ctx, `SELECT username,password_hash,secret_path,session_ttl_seconds,web_port,web_external_access FROM admin_settings WHERE id=1`).Scan(
-		&out.Admin.Username, &out.Admin.PasswordHash, &out.Admin.SecretPath, &out.Admin.SessionTTLSeconds, &out.Admin.WebPort, &adminExternal)
+	err := r.db.QueryRowContext(ctx, `SELECT username,password_hash,password_plain,secret_path,session_ttl_seconds,web_port,web_external_access FROM admin_settings WHERE id=1`).Scan(
+		&out.Admin.Username, &out.Admin.PasswordHash, &out.Admin.Password, &out.Admin.SecretPath, &out.Admin.SessionTTLSeconds, &out.Admin.WebPort, &adminExternal)
 	if err != nil {
 		return out, err
 	}
@@ -62,8 +62,8 @@ func (r *AppSettingsRepository) Get(ctx context.Context) (domain.AppSettings, er
 }
 
 func (r *AppSettingsRepository) UpdateAdmin(ctx context.Context, s domain.AdminSettings) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE admin_settings SET username=?,password_hash=?,secret_path=?,session_ttl_seconds=?,web_port=?,web_external_access=? WHERE id=1`,
-		s.Username, s.PasswordHash, s.SecretPath, s.SessionTTLSeconds, s.WebPort, b2i(s.WebExternalAccess))
+	_, err := r.db.ExecContext(ctx, `UPDATE admin_settings SET username=?,password_hash=?,password_plain=?,secret_path=?,session_ttl_seconds=?,web_port=?,web_external_access=? WHERE id=1`,
+		s.Username, s.PasswordHash, s.Password, s.SecretPath, s.SessionTTLSeconds, s.WebPort, b2i(s.WebExternalAccess))
 	return err
 }
 

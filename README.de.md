@@ -76,12 +76,14 @@ Das Skript erledigt automatisch: das passende Programm für deine Architektur he
 Nach der ersten Installation gibt das Skript den zufällig generierten Pfad, Benutzernamen und das Passwort **direkt aus**:
 
 ```text
-URL:       http://<你的服务器IP>:39527/xxxxxxxxxxxx/
+URL:       http://<deine-server-ip>:39527/xxxxxxxxxxxx/
+Path:      /xxxxxxxxxxxx/
 Username:  xxxxxxxx
 Password:  xxxxxxxx
 ```
 
-> 🔑 Pfad, Benutzername und Passwort werden nur bei der **ersten Installation** zufällig generiert. Bitte sofort speichern, da das Passwort später nicht wiederhergestellt werden kann.
+> 🔑 Pfad, Benutzername und Passwort werden nur bei der **ersten Installation** zufällig generiert; Standardwerte gibt es nicht.
+> 😌 **Vergessen? Nichts muss zurückgesetzt werden**: Führe jederzeit `free-proxy credentials` aus — der Befehl gibt Pfad, Benutzername und Passwort erneut aus, ohne den Dienst neu zu starten oder den laufenden Tunnel zu trennen.
 > 🔒 Bei späteren Updates bleiben Pfad, Benutzername und Passwort unverändert. Eine bewusste Änderung ist über das Dashboard oder mit `free-proxy install --rotate-admin` möglich.
 
 ✅ **Fertig!** Der Dienst zieht bereits im Hintergrund automatisch Knoten, misst die Geschwindigkeit und stellt Verbindungen her. Schauen wir uns als Nächstes die Nutzung an.
@@ -134,21 +136,50 @@ Wenn du eine IP siehst, die sich von der deines VPS unterscheidet, bedeutet das,
 
 ---
 
+## 🔑 Verwaltungspfad / Benutzername / Passwort vergessen?
+
+Führe auf dem Server diesen Befehl aus. Er **gibt Verwaltungs-URL, Pfad, Benutzername und Passwort direkt aus** — er setzt nichts zurück, startet den Dienst nicht neu und trennt den laufenden Tunnel nicht:
+
+```bash
+sudo free-proxy credentials
+```
+
+```text
+URL:      http://<deine-server-ip>:39527/<dein-verwaltungspfad>/
+Path:     /<dein-verwaltungspfad>/
+Username: <admin-benutzername>
+Password: <admin-passwort>
+```
+
+Für Skripte gibt es `--json`:
+
+```bash
+sudo free-proxy credentials --json
+# {"url":"...","path":"/xxxx/","port":39527,"username":"xxxx","password":"xxxx"}
+```
+
+> 💡 Das Passwort liegt zusammen mit seinem scrypt-Hash in `/var/lib/free-proxy/free-proxy.db` (Dateirechte `0600`, nur für `root` lesbar) — deshalb benötigt der Befehl `root`.
+> ⬆️ **Beim Update von einer älteren Version ist nichts von Hand zu tun**: Ältere Versionen haben nur den Passwort-Hash gespeichert, der sich nicht zurücklesen lässt — das Update (erneutes Ausführen des Ein-Zeilen-Installers) **setzt das Passwort daher einmalig zurück und gibt das neue direkt aus**; Verwaltungspfad und Benutzername bleiben unverändert. Der Reset passiert während der Installation, die den Dienst ohnehin neu startet, also ohne zusätzliche Unterbrechung. Danach bleibt das Passwort bestehen: Bei Bedarf einfach `credentials` ausführen.
+
+---
+
 ## 🔧 Häufige Befehle
 
 ```bash
-free-proxy credentials   # 查看管理网址与账号密码
-free-proxy status        # 查看运行状态
-free-proxy logs -n 100   # 查看最近日志
-free-proxy uninstall     # 卸载(加 --purge-data 连数据一起删除)
+free-proxy credentials   # Verwaltungs-URL, Pfad, Benutzername und Passwort ausgeben (bei vergessenem Passwort)
+free-proxy status        # Konfiguration und Datenbankstatus anzeigen
+free-proxy logs --lines 100  # Letzte Logeinträge anzeigen
+free-proxy admin-config --password 'NEUES_PASSWORT'   # Admin-Passwort ändern
+free-proxy uninstall     # Deinstallieren (mit --purge-data auch die Daten löschen)
 ```
 
-**Auf die neueste Version aktualisieren**: Führe einfach den obigen „Installationsbefehl in einer Zeile" erneut aus. Knotendaten, Einstellungen, Verwaltungspfad, Benutzername und Passwort bleiben unverändert.
+**Auf die neueste Version aktualisieren**: Führe einfach den obigen „Installationsbefehl in einer Zeile" erneut aus. Knotendaten, Einstellungen, Verwaltungspfad, Benutzername und Passwort bleiben unverändert — mit einer Ausnahme: Beim Update von einer Version, die nur den Passwort-Hash gespeichert hat, wird das Passwort einmalig zurückgesetzt und in der Installationsausgabe angezeigt (siehe oben).
 
 ---
 
 ## ❓ Häufige Fragen
 
+- **Dashboard-Adresse oder Zugangsdaten vergessen?** Führe auf dem Server `sudo free-proxy credentials` aus: URL, Pfad, Benutzername und Passwort werden direkt ausgegeben — ohne Passwort-Reset und ohne Neustart des Dienstes.
 - **Keine Verbindung / vorübergehend keine Knoten?** Kostenlose Knoten (VPNGate) schwanken naturgemäß; der Dienst versucht es automatisch erneut und schaltet um. Warte etwas länger oder klicke im Backend einmal auf „Knoten aktualisieren und prüfen".
 - **Meldung, dass root / TUN benötigt wird?** Führe es bitte als root aus und stelle sicher, dass der VPS TUN/TAP aktiviert hat. **[BandwagonHost](https://cutt.ly/qywJNWzd)** / **[DMIT](https://cutt.ly/YywJIzY0)** sind beide KVM-basiert, unterstützen es standardmäßig und sind sofort einsatzbereit.
 - **Mein VPS hat ARM-Architektur?** Kein Problem, das Installationsskript erkennt amd64 / arm64 automatisch.
@@ -190,7 +221,7 @@ chmod +x free-proxy && sudo ./free-proxy install
 free-proxy serve                 # 运行控制台 + 代理网关 + 后台任务
 free-proxy install               # 一键安装:二进制 + 依赖 + 环境文件 + 服务(需 root)
 free-proxy uninstall             # 卸载服务与二进制,--purge-data 同时删数据(需 root)
-free-proxy credentials           # 打印管理地址与一次性密码
+free-proxy credentials [--json]  # Verwaltungs-URL, Pfad, Benutzername und Passwort ausgeben
 free-proxy discover              # 拉取并存储节点
 free-proxy status                # 打印配置与数据库表
 free-proxy preflight             # 启动前环境检查
@@ -247,7 +278,7 @@ GET    /api/v1/logs              GET  /api/v1/logs/export
 
 - **Go 1.23+**, Echo v5 (Web/API), sqlc + `modernc.org/sqlite` (reines Go, ohne CGO), goose (eingebettete Migrationen), cobra (CLI), log/slog.
 - Frontend **React 19 + Vite + Tailwind v4 + Zustand**, das Build-Ergebnis wird per `//go:embed` ins Binary eingebettet.
-- Passwörter als `scrypt`-Hash, Authentifizierung über zufälligen geheimen Pfad + Session-Cookie.
+- Passwörter als `scrypt`-Hash, Authentifizierung über zufälligen geheimen Pfad + Session-Cookie. Das Admin-Passwort wird zusätzlich lesbar in der nur für `root` zugänglichen `0600`-Datenbank abgelegt, damit `free-proxy credentials` es ausgeben kann (die Anmeldung prüft immer gegen den Hash); das Proxy-Passwort wird ausschließlich als Hash gespeichert.
 
 ### Aus dem Quellcode bauen
 

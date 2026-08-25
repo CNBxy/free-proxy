@@ -76,12 +76,14 @@ bash <(curl -Ls https://raw.githubusercontent.com/masteralanlab/free-proxy/main/
 첫 설치가 완료되면 무작위로 생성된 경로, 계정, 비밀번호를 **바로 출력**합니다:
 
 ```text
-URL:       http://<你的服务器IP>:39527/xxxxxxxxxxxx/
+URL:       http://<서버 IP>:39527/xxxxxxxxxxxx/
+Path:      /xxxxxxxxxxxx/
 Username:  xxxxxxxx
 Password:  xxxxxxxx
 ```
 
-> 🔑 경로, 계정, 비밀번호는 **첫 설치 시에만** 무작위로 생성됩니다. 비밀번호는 나중에 복구할 수 없으므로 즉시 저장하세요.
+> 🔑 경로, 계정, 비밀번호는 **첫 설치 시에만** 무작위로 생성되며 기본값은 없습니다.
+> 😌 **잊어버려도 재설정할 필요 없습니다**: 언제든지 `free-proxy credentials`를 실행하면 경로·사용자 이름·비밀번호를 다시 출력합니다. 서비스가 재시작되지도, 현재 터널이 끊기지도 않습니다.
 > 🔒 이후 업데이트에서는 기존 경로, 계정, 비밀번호가 그대로 유지됩니다. 명시적으로 변경하려면 관리 화면이나 `free-proxy install --rotate-admin`을 사용하세요.
 
 ✅ **완료!** 서비스는 이미 백그라운드에서 자동으로 노드를 수집하고, 속도를 측정하고, 연결하고 있습니다. 이제 사용 방법을 살펴봅시다.
@@ -134,21 +136,50 @@ VPS와 다른 IP가 보이면, 프록시가 이미 VPN 출구를 통해 전달�
 
 ---
 
+## 🔑 관리 경로 / 계정 / 비밀번호를 잊었다면?
+
+서버에서 다음 명령을 실행하세요. **관리 주소, 관리 경로, 사용자 이름, 비밀번호를 그대로 출력**합니다. 비밀번호를 재설정하지도, 서비스를 재시작하지도, 현재 터널을 끊지도 않습니다:
+
+```bash
+sudo free-proxy credentials
+```
+
+```text
+URL:      http://<서버 IP>:39527/<관리 경로>/
+Path:     /<관리 경로>/
+Username: <관리자 사용자 이름>
+Password: <관리자 비밀번호>
+```
+
+스크립트에서 사용할 때는 `--json`을 추가하세요:
+
+```bash
+sudo free-proxy credentials --json
+# {"url":"...","path":"/xxxx/","port":39527,"username":"xxxx","password":"xxxx"}
+```
+
+> 💡 비밀번호는 scrypt 해시와 함께 `/var/lib/free-proxy/free-proxy.db`(권한 `0600`, `root`만 읽기 가능)에 저장되므로 이 명령에는 `root` 권한이 필요합니다.
+> ⬆️ **예전 버전에서 업그레이드해도 수동 작업은 필요 없습니다**: 예전 버전은 비밀번호 해시만 저장해 되읽을 수 없기 때문에, 업그레이드(명령어 한 줄 설치 재실행) 시 **비밀번호를 한 번 자동으로 재설정하고 새 비밀번호를 바로 출력**합니다. 관리 경로와 사용자 이름은 그대로 유지됩니다. 재설정은 설치 과정에서 일어나며 설치는 원래 서비스를 재시작하므로 추가 중단은 없습니다. 그 뒤로는 비밀번호가 고정되며, 잊었을 때는 `credentials`만 실행하면 됩니다.
+
+---
+
 ## 🔧 자주 쓰는 명령어
 
 ```bash
-free-proxy credentials   # 查看管理网址与账号密码
-free-proxy status        # 查看运行状态
-free-proxy logs -n 100   # 查看最近日志
-free-proxy uninstall     # 卸载(加 --purge-data 连数据一起删除)
+free-proxy credentials   # 관리 주소·경로·사용자 이름·비밀번호 출력(비밀번호를 잊었을 때)
+free-proxy status        # 설정과 데이터베이스 상태 확인
+free-proxy logs --lines 100  # 최근 로그 확인
+free-proxy admin-config --password '새 비밀번호'   # 관리자 비밀번호 변경
+free-proxy uninstall     # 제거(--purge-data를 붙이면 데이터도 삭제)
 ```
 
-**최신 버전으로 업데이트**: 위의 「명령어 한 줄 설치」를 다시 실행하면 됩니다. 노드 데이터, 설정, 관리 경로, 계정, 비밀번호가 모두 유지됩니다.
+**최신 버전으로 업데이트**: 위의 「명령어 한 줄 설치」를 다시 실행하면 됩니다. 노드 데이터, 설정, 관리 경로, 계정, 비밀번호가 모두 유지됩니다(유일한 예외: 비밀번호 해시만 저장하던 예전 버전에서 업그레이드할 때는 비밀번호가 한 번 자동으로 재설정되고 설치 출력에 표시됩니다. 위 내용 참고).
 
 ---
 
 ## ❓ 자주 묻는 질문
 
+- **관리 주소나 계정·비밀번호를 잊었나요?** 서버에서 `sudo free-proxy credentials`를 실행하면 주소, 경로, 사용자 이름, 비밀번호가 그대로 출력됩니다. 비밀번호를 재설정할 필요도, 서비스를 재시작할 필요도 없습니다.
 - **연결이 안 되나요 / 일시적으로 노드가 없나요?** 무료 노드(VPNGate) 자체가 변동이 있으며, 서비스가 자동으로 재시도하고 전환합니다. 조금 더 기다리거나, 관리 콘솔에서 「노드 업데이트 및 검사」를 한 번 클릭하세요.
 - **root / TUN이 필요하다는 안내가 나오나요?** root로 실행하고, VPS에서 TUN/TAP이 켜져 있는지 확인하세요. **[반와공](https://cutt.ly/qywJNWzd)** / **[DMIT](https://cutt.ly/YywJIzY0)**는 모두 KVM 아키텍처로 기본 지원되며, 즉시 사용 가능합니다.
 - **제 VPS가 ARM 아키텍처인가요?** 신경 쓸 필요 없습니다, 설치 스크립트가 amd64 / arm64를 자동으로 인식합니다.
@@ -190,7 +221,7 @@ chmod +x free-proxy && sudo ./free-proxy install
 free-proxy serve                 # 运行控制台 + 代理网关 + 后台任务
 free-proxy install               # 一键安装:二进制 + 依赖 + 环境文件 + 服务(需 root)
 free-proxy uninstall             # 卸载服务与二进制,--purge-data 同时删数据(需 root)
-free-proxy credentials           # 打印管理地址与一次性密码
+free-proxy credentials [--json]  # 관리 주소·경로·사용자 이름·비밀번호 출력
 free-proxy discover              # 拉取并存储节点
 free-proxy status                # 打印配置与数据库表
 free-proxy preflight             # 启动前环境检查

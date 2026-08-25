@@ -84,15 +84,16 @@ func (h *Handlers) UpdateCredentials(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	prev := h.Deps.Auth.Store.Config()
-	hash := prev.PasswordHash
+	hash, plain := prev.PasswordHash, prev.Password
 	if req.Password != "" {
 		var err error
 		if hash, err = security.HashPassword(req.Password); err != nil {
 			return err
 		}
+		plain = req.Password
 	}
 	updated := security.AdminConfig{
-		Username: req.Username, PasswordHash: hash, SecretPath: req.SecretPath,
+		Username: req.Username, PasswordHash: hash, Password: plain, SecretPath: req.SecretPath,
 		Host: req.Host, Port: req.Port,
 		ProxyHost:         firstNonEmpty(req.ProxyHost, prev.ProxyHost),
 		ProxyPort:         firstNonZero(req.ProxyPort, prev.ProxyPort),
@@ -391,12 +392,14 @@ func (h *Handlers) UpdateSystemConfig(c *echo.Context) error {
 		return err
 	}
 	s.Admin.PasswordHash = prev.Admin.PasswordHash
+	s.Admin.Password = prev.Admin.Password
 	s.Proxy.PasswordHash = prev.Proxy.PasswordHash
 	if req.AdminPassword != "" {
 		s.Admin.PasswordHash, err = security.HashPassword(req.AdminPassword)
 		if err != nil {
 			return err
 		}
+		s.Admin.Password = req.AdminPassword
 	}
 	if req.ProxyPassword != "" {
 		s.Proxy.PasswordHash, err = security.HashPassword(req.ProxyPassword)
@@ -412,8 +415,9 @@ func (h *Handlers) UpdateSystemConfig(c *echo.Context) error {
 	}
 	web, proxyExternal := s.Admin.WebExternalAccess, s.Proxy.ExternalAccess
 	admin := security.AdminConfig{
-		Username: s.Admin.Username, PasswordHash: s.Admin.PasswordHash, SecretPath: s.Admin.SecretPath,
-		Host: "0.0.0.0", Port: s.Admin.WebPort, ProxyHost: "0.0.0.0", ProxyPort: s.Proxy.Port,
+		Username: s.Admin.Username, PasswordHash: s.Admin.PasswordHash, Password: s.Admin.Password,
+		SecretPath: s.Admin.SecretPath,
+		Host:       "0.0.0.0", Port: s.Admin.WebPort, ProxyHost: "0.0.0.0", ProxyPort: s.Proxy.Port,
 		WebExternalAccess: &web, ProxyExternalAccess: &proxyExternal,
 	}
 	if err := h.Deps.Auth.Store.Update(admin); err != nil {

@@ -30,7 +30,7 @@ free-proxy <命令> --help
 | --- | --- | --- |
 | [`serve`](#free-proxy-serve) | 启动网页/API、代理网关和后台任务 | 生产环境通常使用 Linux `root` |
 | [`discover`](#free-proxy-discover) | 从节点提供方拉取并保存节点 | 数据目录可写、可访问网络 |
-| [`credentials`](#free-proxy-credentials) | 显示管理地址、用户名和初始密码状态 | 数据目录可读写 |
+| [`credentials`](#free-proxy-credentials) | 打印管理地址、管理路径、用户名和密码 | 数据目录可读写 |
 | [`status`](#free-proxy-status) | 显示本地配置和数据库表状态 | 数据目录可读写 |
 | [`preflight`](#free-proxy-preflight) | 执行完整的启动前检查 | 检查本身无需提权 |
 | [`logs`](#free-proxy-logs) | 输出最新日志文件中的最近记录 | 日志目录可读 |
@@ -87,21 +87,58 @@ free-proxy discover
 
 ### `free-proxy credentials`
 
-显示当前网页管理地址和用户名。如果本次执行刚刚创建或迁移了初始明文密码，也会显示 `Password`；数据库平时只保存密码哈希，因此后续执行通常会显示密码已配置但不可回读。
+**忘记账号密码时用这个命令。** 它直接打印当前的管理地址、管理路径、用户名和密码，不重置任何凭据、不重启服务、不中断正在使用的隧道。命令只读取本机数据库，可随时执行。
 
 ```text
-free-proxy credentials
+free-proxy credentials [--json]
 ```
 
-此命令没有专用参数。输出格式如下：
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `--json` | 布尔开关 | 关闭 | 以 JSON 输出，便于脚本处理（字段：`url`、`path`、`port`、`username`、`password`）。 |
+
+默认输出格式如下：
+
+```bash
+sudo free-proxy credentials
+```
 
 ```text
-URL: http://0.0.0.0:39527/<管理路径>/
+URL:      http://<你的服务器IP>:39527/<管理路径>/
+Path:     /<管理路径>/
 Username: <管理员用户名>
-Password: <初始密码或状态提示>
+Password: <管理员密码>
 ```
 
-忘记现有密码时，可以通过 [`admin-config --password`](#free-proxy-admin-config) 设置新密码。
+JSON 输出示例：
+
+```bash
+sudo free-proxy credentials --json
+```
+
+```text
+{
+  "url": "http://<你的服务器IP>:39527/<管理路径>/",
+  "path": "/<管理路径>/",
+  "port": 39527,
+  "username": "<管理员用户名>",
+  "password": "<管理员密码>"
+}
+```
+
+只取某一项时可以配合其他工具，例如：
+
+```bash
+# 只打印密码
+sudo free-proxy credentials --json | grep '"password"'
+```
+
+说明：
+
+- 密码与 scrypt 哈希一并保存在 `/var/lib/free-proxy/free-proxy.db` 中，数据库文件权限为 `0600`（仅 `root` 可读），登录校验始终使用哈希。因此该命令需要能读取数据库，通常以 `root` 执行。
+- 旧版本的安装只存了密码哈希。用安装脚本或 [`install`](#free-proxy-install) 升级到本版本时，会**自动重置一次密码**并在安装输出中打印新密码（管理路径和用户名不变），因此升级之后本命令就能正常回显，无需手动处理。
+- 只有在**没有重新执行安装、仅替换了二进制**的情况下，数据库里才仍然没有可回读的密码，此时会显示 `Password: [set before this version; not recoverable]`，按提示执行一次 `sudo free-proxy install` 即可（它会重置并打印新密码）。
+- 在网页后台或用 `admin-config` 改过密码后，本命令打印的始终是最新密码。
 
 ### `free-proxy status`
 
@@ -150,7 +187,7 @@ free-proxy logs --lines 200
 
 ### `free-proxy admin-config`
 
-持久修改 SQLite 中的网页管理凭据、管理路径、网页端口或代理端口。没有传入的字段保持原值；保存后，监听器相关修改需要重启服务才会生效。
+持久修改 SQLite 中的网页管理凭据、管理路径、网页端口或代理端口。没有传入的字段保持原值。正在运行的服务持有自己的配置快照，因此**这里的任何修改（包括用户名和密码）都要重启服务后才会生效**：`sudo systemctl restart free-proxy`。只是想查看现有账号密码、不做任何改动时，请用 [`credentials`](#free-proxy-credentials)，它不需要重启。
 
 ```text
 free-proxy admin-config [参数]
@@ -159,7 +196,7 @@ free-proxy admin-config [参数]
 | 参数 | 类型 | 说明 |
 | --- | --- | --- |
 | `--username <用户名>` | 字符串 | 设置网页后台管理员用户名。空字符串不更新原值。 |
-| `--password <密码>` | 字符串 | 设置网页后台管理员密码；保存时使用 scrypt 哈希。空字符串不更新原值。为避免进入 Shell 历史，交互式使用时应注意终端的历史记录。 |
+| `--password <密码>` | 字符串 | 设置网页后台管理员密码；同时保存 scrypt 哈希（用于登录校验）和可回读的密码（供 [`credentials`](#free-proxy-credentials) 打印）。空字符串不更新原值。为避免进入 Shell 历史，交互式使用时应注意终端的历史记录。 |
 | `--secret-path <路径段>` | 字符串 | 设置管理页面 URL 中的秘密路径段。空字符串不更新原值。 |
 | `--port <端口>` | 整数 | 设置网页监听端口；`0` 不更新原值。 |
 | `--proxy-port <端口>` | 整数 | 设置 HTTP/SOCKS5 统一代理端口；`0` 不更新原值。 |
@@ -238,9 +275,25 @@ sudo free-proxy install-deps
 2. 尝试安装缺失的系统依赖；
 3. 首次安装时创建 `/etc/free-proxy/free-proxy.env` 和 `/var/lib/free-proxy`；
 4. 创建或迁移数据库设置；
-5. 安装、启用并重启 systemd 或 OpenRC 服务。
+5. 从旧版本升级、且数据库里只有密码哈希时，**自动重置一次管理员密码**（详见下文）；
+6. 安装、启用并重启 systemd 或 OpenRC 服务。
 
-再次执行安装会保留现有节点数据、管理路径、用户名和密码，除非明确使用 `--rotate-admin`。
+再次执行安装会保留现有节点数据、管理路径、用户名和密码，除非明确使用 `--rotate-admin`。安装输出里的路径、用户名和密码之后随时可以用 [`credentials`](#free-proxy-credentials) 重新打印，不必为了看密码而用 `--rotate-admin` 重置（重置会重启服务并断开当前隧道）。
+
+**一次性的密码重置（仅限从旧版本升级）**：旧版本只保存密码哈希，密码无法回读。升级到本版本时，安装过程会检测到这种情况并生成一个新的随机密码，在输出中打印：
+
+```text
+Your previous password was stored as a hash only and could not be read back,
+so this update reset it once. The management path and username are unchanged:
+  URL:       http://<你的服务器IP>:39527/<管理路径>/
+  Path:      /<管理路径>/
+  Username:  <管理员用户名>
+  Password:  <新生成的密码>
+```
+
+- **管理路径和用户名不变**，原有书签和登录名继续可用，只有密码变了。
+- 重置发生在安装过程中，而安装本来就会重启服务，因此没有额外的中断。
+- 只发生一次：之后的升级会原样保留密码，忘记时用 [`credentials`](#free-proxy-credentials) 查看即可。
 
 ```text
 free-proxy install [--rotate-admin]

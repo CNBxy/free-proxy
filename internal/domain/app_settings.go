@@ -1,8 +1,11 @@
 package domain
 
 type AdminSettings struct {
-	Username          string `json:"username"`
-	PasswordHash      string `json:"-"`
+	Username     string `json:"username"`
+	PasswordHash string `json:"-"`
+	// Password is the recoverable copy of the admin password, kept so
+	// `free-proxy credentials` can print it. Never serialized to the API.
+	Password          string `json:"-"`
 	SecretPath        string `json:"secret_path"`
 	SessionTTLSeconds int    `json:"session_ttl_seconds"`
 	WebPort           int    `json:"web_port"`

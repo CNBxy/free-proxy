@@ -93,8 +93,13 @@ func RandomCredential(length int) string {
 // AdminConfig is the database-backed admin/listener configuration. Host values
 // are fixed listener constants; the ports and exposure flags are persisted.
 type AdminConfig struct {
-	Username            string
-	PasswordHash        string
+	Username     string
+	PasswordHash string
+	// Password is the recoverable copy of the admin password so operators can
+	// read it back with `free-proxy credentials` instead of rotating (which
+	// restarts the service and drops the live tunnel). PasswordHash stays
+	// authoritative for verification; Password is only ever printed locally.
+	Password            string
 	SecretPath          string
 	Host                string
 	Port                int
@@ -118,14 +123,12 @@ type AdminConfigStore struct {
 	cfg  *config.Config
 	repo *store.AppSettingsRepository
 
-	mu                sync.RWMutex
-	config            AdminConfig
-	bootstrapPassword string
+	mu     sync.RWMutex
+	config AdminConfig
 }
 
 // NewAdminConfigStore loads database settings, migrates legacy files, or creates
-// random first-install credentials. Plaintext bootstrap passwords live only in
-// this process and are never written to disk.
+// random first-install credentials.
 func NewAdminConfigStore(cfg *config.Config, repo *store.AppSettingsRepository) (*AdminConfigStore, error) {
 	s := &AdminConfigStore{cfg: cfg, repo: repo}
 	if err := s.loadOrCreate(); err != nil {
@@ -147,6 +150,7 @@ func (s *AdminConfigStore) Update(c AdminConfig) error {
 	}
 	all.Admin.Username = c.Username
 	all.Admin.PasswordHash = c.PasswordHash
+	all.Admin.Password = c.Password
 	all.Admin.SecretPath = c.SecretPath
 	all.Admin.WebPort = c.Port
 	all.Admin.WebExternalAccess = c.WebExternalAllowed()
@@ -160,25 +164,33 @@ func (s *AdminConfigStore) Update(c AdminConfig) error {
 	}
 	s.mu.Lock()
 	s.config = c
-	s.bootstrapPassword = ""
 	s.mu.Unlock()
 	return nil
 }
 
+// Rotate replaces the username, management path, and password at once.
 func (s *AdminConfigStore) Rotate() (AdminConfig, string, error) {
+	c := s.Config()
+	c.Username, c.SecretPath = RandomCredential(12), RandomCredential(12)
+	return s.setNewPassword(c)
+}
+
+// ResetPassword issues a new random password and keeps the username and
+// management path, so existing bookmarks and the login name still work.
+func (s *AdminConfigStore) ResetPassword() (AdminConfig, string, error) {
+	return s.setNewPassword(s.Config())
+}
+
+func (s *AdminConfigStore) setNewPassword(c AdminConfig) (AdminConfig, string, error) {
 	password := RandomCredential(12)
 	hash, err := HashPassword(password)
 	if err != nil {
 		return AdminConfig{}, "", err
 	}
-	c := s.Config()
-	c.Username, c.PasswordHash, c.SecretPath = RandomCredential(12), hash, RandomCredential(12)
+	c.PasswordHash, c.Password = hash, password
 	if err := s.Update(c); err != nil {
 		return AdminConfig{}, "", err
 	}
-	s.mu.Lock()
-	s.bootstrapPassword = password
-	s.mu.Unlock()
 	return c, password, nil
 }
 
@@ -186,18 +198,6 @@ func (s *AdminConfigStore) SetExternalAccess(web, proxy bool) error {
 	c := s.Config()
 	c.WebExternalAccess, c.ProxyExternalAccess = &web, &proxy
 	return s.Update(c)
-}
-
-func (s *AdminConfigStore) BootstrapPassword() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.bootstrapPassword
-}
-
-func (s *AdminConfigStore) ClearBootstrapPassword() {
-	s.mu.Lock()
-	s.bootstrapPassword = ""
-	s.mu.Unlock()
 }
 
 func (s *AdminConfigStore) loadOrCreate() error {
@@ -218,6 +218,7 @@ func (s *AdminConfigStore) loadOrCreate() error {
 		}
 		all.Admin.Username = firstNonEmpty(legacy.Username, RandomCredential(12))
 		all.Admin.PasswordHash = legacy.PasswordHash
+		all.Admin.Password = legacy.PlaintextPassword
 		all.Admin.SecretPath = firstNonEmpty(legacy.SecretPath, RandomCredential(12))
 		all.Admin.WebPort = legacy.Port
 		if all.Admin.WebPort == 0 || all.Admin.WebPort == 8787 {
@@ -234,9 +235,6 @@ func (s *AdminConfigStore) loadOrCreate() error {
 		if err = s.repo.UpdateProxy(ctx, all.Proxy); err != nil {
 			return err
 		}
-		if legacy.PlaintextPassword != "" {
-			s.bootstrapPassword = legacy.PlaintextPassword
-		}
 	}
 	if all.Admin.PasswordHash == "" {
 		password := firstNonEmpty(s.cfg.AdminPassword, RandomCredential(12))
@@ -246,6 +244,7 @@ func (s *AdminConfigStore) loadOrCreate() error {
 		}
 		all.Admin.Username = firstNonEmpty(s.cfg.AdminUsername, RandomCredential(12))
 		all.Admin.PasswordHash = hash
+		all.Admin.Password = password
 		all.Admin.SecretPath = firstNonEmpty(s.cfg.AdminSecretPath, RandomCredential(12))
 		if all.Admin.WebPort == 0 || all.Admin.WebPort == 8787 {
 			all.Admin.WebPort = 39527
@@ -253,14 +252,26 @@ func (s *AdminConfigStore) loadOrCreate() error {
 		if err = s.repo.UpdateAdmin(ctx, all.Admin); err != nil {
 			return err
 		}
-		if s.cfg.AdminPassword == "" {
-			s.bootstrapPassword = password
-		}
 	}
-	// Preserve an old one-time password for the current install invocation only.
-	if s.bootstrapPassword == "" {
+	// An install that predates recoverable storage may still hold its password in
+	// plain sight elsewhere: the one-time file from its own first install, or the
+	// operator's own FREE_PROXY_ADMIN_PASSWORD. Recovering it there spares that
+	// install the reset `free-proxy install` would otherwise perform. Each
+	// candidate is adopted only if it verifies — anything else is stale.
+	if all.Admin.Password == "" {
+		candidates := []string{s.cfg.AdminPassword}
 		if data, readErr := os.ReadFile(bootstrapPath); readErr == nil {
-			s.bootstrapPassword = strings.TrimSpace(string(data))
+			candidates = append(candidates, strings.TrimSpace(string(data)))
+		}
+		for _, pw := range candidates {
+			if pw == "" || !VerifyPassword(pw, all.Admin.PasswordHash) {
+				continue
+			}
+			all.Admin.Password = pw
+			if err = s.repo.UpdateAdmin(ctx, all.Admin); err != nil {
+				return err
+			}
+			break
 		}
 	}
 	_ = os.Remove(legacyPath)
@@ -268,6 +279,7 @@ func (s *AdminConfigStore) loadOrCreate() error {
 	web, proxy := all.Admin.WebExternalAccess, all.Proxy.ExternalAccess
 	s.config = AdminConfig{
 		Username: all.Admin.Username, PasswordHash: all.Admin.PasswordHash,
+		Password:   all.Admin.Password,
 		SecretPath: all.Admin.SecretPath, Host: "0.0.0.0", Port: all.Admin.WebPort,
 		ProxyHost: "0.0.0.0", ProxyPort: all.Proxy.Port,
 		WebExternalAccess: &web, ProxyExternalAccess: &proxy,
@@ -381,10 +393,6 @@ func NewAuthService(cfg *config.Config, store *AdminConfigStore, sessions *Sessi
 // Verify checks a username/password against the stored config.
 func (a *AuthService) Verify(username, password string) bool {
 	c := a.Store.Config()
-	ok := subtle.ConstantTimeCompare([]byte(username), []byte(c.Username)) == 1 &&
+	return subtle.ConstantTimeCompare([]byte(username), []byte(c.Username)) == 1 &&
 		VerifyPassword(password, c.PasswordHash)
-	if ok {
-		a.Store.ClearBootstrapPassword()
-	}
-	return ok
 }
