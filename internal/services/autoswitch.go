@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/masteralanlab/free-proxy/internal/config"
 	"github.com/masteralanlab/free-proxy/internal/domain"
@@ -58,11 +59,20 @@ func (s *AutoSwitchService) Switch(ctx context.Context) (*domain.TunnelStartResu
 			return &res, nil
 		}
 		excluded[candidate.ID] = true
+		// Activate already separates the two failures: a non-nil error is ours
+		// (database, device, routing, a candidate the policy should not have
+		// offered), while !res.Success is the node refusing the handshake. Only
+		// the second is the node's fault. Charging the first to it put healthy
+		// nodes into cooldown for a local fault — three per rotation, every
+		// rotation, for as long as the fault lasted.
+		if err != nil {
+			slog.Warn("activation failed locally; trying another node without penalising this one",
+				"module", "autoswitch", "node", candidate.ID, "err", err)
+			continue
+		}
 		msg := "activation failed"
 		if res.Message != "" {
 			msg = res.Message
-		} else if err != nil {
-			msg = err.Error()
 		}
 		_ = s.nodes.Blacklist(ctx, candidate.ID, msg, s.cfg.InvalidBackoff())
 	}
@@ -83,7 +93,7 @@ func (s *AutoSwitchService) HandleUnexpectedExit(ctx context.Context) {
 }
 
 func (s *AutoSwitchService) selectExcluding(ctx context.Context, excluded map[string]bool) (*domain.ProxyNodeRead, error) {
-	candidates, err := s.nodes.ListNodes(ctx, store.NodeFilter{Status: string(domain.NodeReady), CurrentOnly: true}, 1000, 0)
+	candidates, err := s.nodes.ListNodes(ctx, store.NodeFilter{Status: string(domain.NodeReady)}, 1000, 0)
 	if err != nil {
 		return nil, err
 	}

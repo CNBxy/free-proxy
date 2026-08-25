@@ -4,6 +4,8 @@
 
 > Führe auf einem kleinen Server im Ausland **einen einzigen Befehl** aus: Er zieht automatisch Hunderte kostenlose Ausgänge aus öffentlichen Knotenquellen (VPNGate), misst deren Geschwindigkeit in Echtzeit, wählt intelligent die schnellste Route und stellt nach außen einen stabilen **SOCKS5- / HTTP-Proxy** bereit. Fällt ein Knoten aus, wird automatisch umgeschaltet — du musst nichts überwachen.
 
+> 🎥 Demo-Video: [YouTube](https://youtu.be/0uf9St0cBM8)
+
 <p>
   <img alt="Bereitstellung mit einem Befehl" src="https://img.shields.io/badge/Bereitstellung-Ein%20Befehl-brightgreen">
   <img alt="Go Einzelbinary" src="https://img.shields.io/badge/Go-Einzelbinary%C2%B7ohne%20Abh%C3%A4ngigkeiten-00ADD8">
@@ -208,14 +210,14 @@ FREE_PROXY_DATA_DIR=/var/lib/free-proxy
 FREE_PROXY_DATABASE_URL=
 FREE_PROXY_SQL_ECHO=false
 FREE_PROXY_ALLOW_PROCESS_RESTART=true
-FREE_PROXY_PREFLIGHT_STRICT=false
 FREE_PROXY_OPENVPN_COMMAND=openvpn
 FREE_PROXY_OPENVPN_USERNAME=vpn
 FREE_PROXY_OPENVPN_PASSWORD=vpn
-FREE_PROXY_TUNNEL_INTERFACE=tun0
-FREE_PROXY_TEST_TUN_START=2
-FREE_PROXY_TEST_TUN_END=99
-FREE_PROXY_POLICY_ROUTING_TABLE=100
+FREE_PROXY_TUNNEL_INTERFACE=fpx0
+FREE_PROXY_PROBE_DEVICE_PREFIX=fpx
+FREE_PROXY_TEST_TUN_START=1
+FREE_PROXY_TEST_TUN_END=64
+FREE_PROXY_POLICY_ROUTING_TABLE=9527
 ```
 
 > Web port, proxy port, credentials, discovery, maintenance, DNS, routing, and external-access options are managed in the dashboard and stored in SQLite.

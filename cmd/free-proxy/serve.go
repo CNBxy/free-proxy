@@ -39,6 +39,7 @@ func buildDeps(ctx context.Context, cfg *config.Config, repos *store.Repos, auth
 	tunnelMgr := tunnel.NewManager(cfg)
 	router := netx.NewPolicyRouter(runner, netx.PolicyRouterConfig{
 		Table: cfg.PolicyRoutingTable, Interface: cfg.TunnelInterface,
+		DevicePrefix: cfg.ProbeDevicePrefix,
 		SetupRetries: cfg.RoutingSetupRetries, RetryInterval: cfg.RoutingRetryInterval(),
 		StrictRPF: cfg.RoutingStrictRPFilter,
 	})
@@ -76,7 +77,7 @@ func buildDeps(ctx context.Context, cfg *config.Config, repos *store.Repos, auth
 	}, connector)
 
 	pool := services.NewProxyPoolService(repos.Nodes, repos.Settings)
-	gateway := services.NewGatewayService(cfg, repos.Nodes, repos.Settings, tunnelMgr, router, proxyGateway, pool, coordinator)
+	gateway := services.NewGatewayService(cfg, repos.Nodes, repos.Settings, tunnelMgr, router, proxyGateway, pool, coordinator, runner)
 	autoSwitch := services.NewAutoSwitchService(cfg, repos.Nodes, repos.Settings, pool, gateway)
 	gateway.SetUnexpectedExitHandler(autoSwitch.HandleUnexpectedExit)
 
@@ -84,18 +85,21 @@ func buildDeps(ctx context.Context, cfg *config.Config, repos *store.Repos, auth
 	health := services.NewHealthService(cfg, healthChecker, repos.Nodes, repos.Settings, gateway, autoSwitch)
 	settingsSvc := services.NewSettingsService(repos.Nodes, repos.Settings, pool, gateway, autoSwitch, coordinator)
 
-	tunAlloc, _ := netx.NewTunAllocator(cfg.TestTunStart, cfg.TestTunEnd)
+	tunAlloc, _ := netx.NewTunAllocator(cfg.ProbeDevicePrefix, cfg.TestTunStart, cfg.TestTunEnd)
 	probe := services.NewProbeService(cfg, repos.Nodes, tunnelMgr, tunAlloc, runner, ipInfo, repos.Probes, coordinator)
 	maintenance := services.NewMaintenanceService(cfg, repos.Nodes, repos.Settings, discovery, probe, pool, gateway, autoSwitch, coordinator)
+	liveness := services.NewLivenessService(repos.Nodes, gateway)
 
 	return &api.Deps{
 		Cfg: cfg, Version: version, Repos: repos, Auth: auth, Logs: logs,
 		Coordinator: coordinator, Jobs: jobs, Discovery: discovery, Probe: probe,
 		Gateway: gateway, Pool: pool, Settings: settingsSvc, Health: health,
 		Diagnostics: diagnostics, Maintenance: maintenance, AutoSwitch: autoSwitch,
+		Liveness:         liveness,
 		MaintenanceMon:   services.NewMaintenanceMonitor(cfg, maintenance, gateway),
 		ActiveLatencyMon: services.NewActiveLatencyMonitor(cfg, repos.Nodes, gateway, runner),
 		HealthMon:        services.NewHealthMonitor(cfg, health, gateway),
+		LivenessMon:      services.NewLivenessMonitor(liveness),
 	}
 }
 
@@ -147,8 +151,12 @@ func runServe(ctx context.Context, cfg *config.Config, hostOverride string, port
 
 	go deps.HealthMon.Run(ctx)
 	go deps.ActiveLatencyMon.Run(ctx)
+	// The sweep is pool upkeep, so it rides the existing maintenance switch:
+	// turning maintenance off already means "stop working the pool in the
+	// background", and that should silence the dialling too.
 	if cfg.MaintenanceEnabled {
 		go deps.MaintenanceMon.Run(ctx)
+		go deps.LivenessMon.Run(ctx)
 	}
 
 	// Bind all interfaces; external web access is gated at runtime by the admin

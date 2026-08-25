@@ -61,11 +61,21 @@ func (m *MaintenanceService) run(ctx context.Context) (domain.MaintenanceResult,
 	defer m.mu.Unlock()
 	slog.Info("starting periodic maintenance", "module", "maintenance")
 	_ = m.nodes.ClearExpiredBlacklist(ctx)
+	// A provider fetch that fails must not cost the cycle its probe pass: probing
+	// reads the stored pool and does not need the provider to answer. Aborting
+	// here used to drop a whole 200-node pass over a transient network error.
+	//
+	// The purge is the one step that does depend on the fetch. last_seen_at only
+	// advances on a successful discovery, so running it after a failure reads an
+	// outage as the entire pool going stale — and once the outage outlasts the
+	// grace window that deletes every node, all of them still working.
 	discovery, err := m.discovery.Discover(ctx)
 	if err != nil {
-		return domain.MaintenanceResult{}, err
+		slog.Warn("node discovery failed; probing the stored pool and skipping the stale purge",
+			"module", "maintenance", "err", err)
+	} else {
+		_, _ = m.nodes.PurgeStaleNodes(ctx, m.cfg.StaleNodeGrace())
 	}
-	_, _ = m.nodes.PurgeStaleNodes(ctx, m.cfg.StaleNodeGrace())
 
 	settings, err := m.settingsRepo.Get(ctx)
 	if err != nil {
@@ -114,12 +124,13 @@ func (m *MaintenanceService) run(ctx context.Context) (domain.MaintenanceResult,
 	if a := m.gateway.Status().ActiveNodeID; a != nil {
 		activeID = *a
 	}
-	var remaining []string
+	var eligible []domain.ProxyNodeRead
 	for _, n := range all {
 		if !initialTested[n.ID] && n.ID != activeID {
-			remaining = append(remaining, n.ID)
+			eligible = append(eligible, n)
 		}
 	}
+	remaining := probeSlice(eligible)
 	if len(remaining) > 0 {
 		results, _ := m.probe.ProbeMany(ctx, remaining)
 		probed += len(results)
@@ -135,8 +146,43 @@ func (m *MaintenanceService) run(ctx context.Context) (domain.MaintenanceResult,
 	return m.result(ctx, discovery.Discovered, probed)
 }
 
+// probeBudget caps how many nodes one maintenance cycle hands to the OpenVPN
+// probe. A cycle holds the operation lock from start to finish, so an uncapped
+// pass would block manual node switching for as long as it ran — and that
+// duration used to be bounded only by how big the pool happened to be. With
+// maintenance running every few hours, this budget still walks the whole pool
+// within a day.
+const probeBudget = 200
+
+// probeSlice picks this cycle's share of the candidates, least-recently-probed
+// first so coverage rotates and nodes that have never been probed go first.
+func probeSlice(nodes []domain.ProxyNodeRead) []string {
+	sort.SliceStable(nodes, func(i, j int) bool {
+		a, b := nodes[i].LastProbedAt, nodes[j].LastProbedAt
+		if (a == nil) != (b == nil) {
+			return a == nil
+		}
+		if a == nil {
+			return false
+		}
+		return a.Before(*b)
+	})
+	if len(nodes) > probeBudget {
+		nodes = nodes[:probeBudget]
+	}
+	out := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, n.ID)
+	}
+	return out
+}
+
+// candidateNodes lists the nodes worth spending an OpenVPN handshake on. Hosts
+// the last liveness sweep could not reach are excluded: probing them costs the
+// full connect timeout each and cannot succeed. They come back on their own if a
+// later sweep reaches them, which resets the counter this filter reads.
 func (m *MaintenanceService) candidateNodes(ctx context.Context, includeUnavailable bool) ([]domain.ProxyNodeRead, error) {
-	nodes, err := m.nodes.ListNodes(ctx, store.NodeFilter{CurrentOnly: true}, 1000, 0)
+	nodes, err := m.nodes.ListNodes(ctx, store.NodeFilter{ReachableOnly: true}, candidateFetchLimit, 0)
 	if err != nil {
 		return nil, err
 	}

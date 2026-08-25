@@ -5,14 +5,18 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 
 	"github.com/masteralanlab/free-proxy/internal/config"
+	"github.com/masteralanlab/free-proxy/internal/naming"
+	"github.com/masteralanlab/free-proxy/internal/netx"
 	"github.com/masteralanlab/free-proxy/internal/platform"
 	"github.com/masteralanlab/free-proxy/internal/providers/vpngate"
 	"github.com/masteralanlab/free-proxy/internal/security"
@@ -95,7 +99,11 @@ func credentialsCmd() *cobra.Command {
 			}
 			c := adminStore.Config()
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "URL: http://%s:%d/%s/\n", c.Host, c.Port, c.SecretPath)
+			url, note := adminURL(cmd.Context(), c)
+			fmt.Fprintf(out, "URL: %s\n", url)
+			if note != "" {
+				fmt.Fprintf(out, "     %s\n", note)
+			}
 			fmt.Fprintf(out, "Username: %s\n", c.Username)
 			if pw := adminStore.BootstrapPassword(); pw != "" {
 				fmt.Fprintf(out, "Password: %s\n", pw)
@@ -295,6 +303,15 @@ func doctorCmd() *cobra.Command {
 		Short: "Check (and optionally install) required system dependencies",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			checks := platform.RunChecks()
+			// Naming checks need the resolved config. A config that fails to
+			// load is reported by `serve` itself; doctor still prints the
+			// dependency checks rather than aborting on it.
+			if cfg, err := loadConfig(); err == nil {
+				checks = append(checks, platform.NamingChecks(cmd.Context(),
+					cfg.TunnelInterface, cfg.ProbeDevicePrefix, cfg.PolicyRoutingTable)...)
+			} else {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: configuration could not be loaded, skipping naming checks: %v\n", err)
+			}
 			out := cmd.OutOrStdout()
 			for _, c := range checks {
 				mark := "OK  "
@@ -361,6 +378,27 @@ func installCmd() *cobra.Command {
 			if err := platform.WriteDefaultEnv(); err != nil {
 				return fmt.Errorf("write environment: %w", err)
 			}
+			// Upgrades keep their existing env file, so an install that still
+			// claims the shared tun0 / table 100 has to be moved explicitly.
+			migrated, err := platform.MigrateLegacyNaming()
+			if err != nil {
+				return fmt.Errorf("migrate network naming: %w", err)
+			}
+			if len(migrated) > 0 {
+				fmt.Fprintln(out, "Moved shared network identifiers into this project's private namespace:")
+				for _, change := range migrated {
+					fmt.Fprintf(out, "  %s\n", change)
+				}
+			}
+			// A previous run killed before it could tear down leaves policy
+			// entries pointing at the old device. They are inert now, but would
+			// hijack whatever creates that device name next.
+			if orphans := netx.CleanupOrphanedRules(ctx, nil, naming.LegacyTunnelInterface); len(orphans) > 0 {
+				fmt.Fprintf(out, "Removed stale policy entries left by an earlier release (device %s is gone):\n", naming.LegacyTunnelInterface)
+				for _, entry := range orphans {
+					fmt.Fprintf(out, "  %s\n", entry)
+				}
+			}
 			// The first install creates database-backed random admin credentials.
 			// Updates preserve them unless rotation was explicitly requested.
 			cfg, err := loadConfig()
@@ -369,6 +407,10 @@ func installCmd() *cobra.Command {
 			}
 			if err := cfg.EnsureDirectories(); err != nil {
 				return err
+			}
+			// Advisory: makes our table id visible as taken to other tools.
+			if err := platform.RegisterRoutingTable(cfg.PolicyRoutingTable); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not register routing table alias: %v\n", err)
 			}
 			db, repos, err := openAppStore(ctx, cfg)
 			if err != nil {
@@ -401,7 +443,11 @@ func installCmd() *cobra.Command {
 			} else {
 				fmt.Fprintln(out, "Existing management path and admin login were preserved:")
 			}
-			fmt.Fprintf(out, "  URL:       http://<your-server-ip>:%d/%s/\n", admin.Port, admin.SecretPath)
+			url, note := adminURL(ctx, admin)
+			fmt.Fprintf(out, "  URL:       %s\n", url)
+			if note != "" {
+				fmt.Fprintf(out, "             %s\n", note)
+			}
 			fmt.Fprintf(out, "  Username:  %s\n", admin.Username)
 			if password != "" {
 				fmt.Fprintf(out, "  Password:  %s\n", password)
@@ -414,6 +460,23 @@ func installCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&rotateAdmin, "rotate-admin", false, "Generate a new random management path, username, and password")
 	return cmd
+}
+
+// adminURL renders the management URL with a real address in it, plus a note to
+// print underneath when that address is not internet-reachable. The listener
+// binds a wildcard, so the stored host is "0.0.0.0" — useless to paste into a
+// browser; netx.ResolveAdvertiseHost picks the address a human actually needs.
+func adminURL(ctx context.Context, c security.AdminConfig) (url, note string) {
+	addr := netx.ResolveAdvertiseHost(ctx, c.Host)
+	host := addr.Host
+	switch {
+	case host == "":
+		host = "<your-server-ip>"
+		note = "(no address could be detected on this host)"
+	case !addr.Public:
+		note = "(private address — reachable from this network only)"
+	}
+	return fmt.Sprintf("http://%s/%s/", net.JoinHostPort(host, strconv.Itoa(c.Port)), c.SecretPath), note
 }
 
 func openAppStore(ctx context.Context, cfg *config.Config) (*sql.DB, *store.Repos, error) {

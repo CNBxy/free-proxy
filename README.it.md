@@ -4,6 +4,8 @@
 
 > Esegui **un solo comando** su un piccolo VPS all'estero: recupererà automaticamente centinaia di uscite gratuite da fonti pubbliche di nodi (VPNGate), con test di velocità reali e selezione intelligente della linea più veloce, offrendo verso l'esterno un **proxy SOCKS5 / HTTP** stabile. Quando un nodo cade, passa automaticamente a un altro, senza che tu debba mai stare a controllare.
 
+> 🎥 Video dimostrativo: [YouTube](https://youtu.be/0uf9St0cBM8)
+
 <p>
   <img alt="Distribuzione con un comando" src="https://img.shields.io/badge/Distribuzione-un%20comando-brightgreen">
   <img alt="Go binario unico" src="https://img.shields.io/badge/Go-binario%20unico·zero%20dipendenze-00ADD8">
@@ -208,14 +210,14 @@ FREE_PROXY_DATA_DIR=/var/lib/free-proxy
 FREE_PROXY_DATABASE_URL=
 FREE_PROXY_SQL_ECHO=false
 FREE_PROXY_ALLOW_PROCESS_RESTART=true
-FREE_PROXY_PREFLIGHT_STRICT=false
 FREE_PROXY_OPENVPN_COMMAND=openvpn
 FREE_PROXY_OPENVPN_USERNAME=vpn
 FREE_PROXY_OPENVPN_PASSWORD=vpn
-FREE_PROXY_TUNNEL_INTERFACE=tun0
-FREE_PROXY_TEST_TUN_START=2
-FREE_PROXY_TEST_TUN_END=99
-FREE_PROXY_POLICY_ROUTING_TABLE=100
+FREE_PROXY_TUNNEL_INTERFACE=fpx0
+FREE_PROXY_PROBE_DEVICE_PREFIX=fpx
+FREE_PROXY_TEST_TUN_START=1
+FREE_PROXY_TEST_TUN_END=64
+FREE_PROXY_POLICY_ROUTING_TABLE=9527
 ```
 
 > Web port, proxy port, credentials, discovery, maintenance, DNS, routing, and external-access options are managed in the dashboard and stored in SQLite.

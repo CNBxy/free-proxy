@@ -25,6 +25,7 @@ type GatewayService struct {
 	proxy        *proxy.Gateway
 	pool         *ProxyPoolService
 	coordinator  *Coordinator
+	runner       netx.CommandRunner
 
 	opMu              sync.Mutex
 	mu                sync.Mutex
@@ -38,10 +39,14 @@ type GatewayService struct {
 
 // NewGatewayService constructs a GatewayService.
 func NewGatewayService(cfg *config.Config, nodes *store.NodeRepository, settingsRepo *store.SettingsRepository,
-	mgr *tunnel.Manager, router *netx.PolicyRouter, pg *proxy.Gateway, pool *ProxyPoolService, coordinator *Coordinator) *GatewayService {
+	mgr *tunnel.Manager, router *netx.PolicyRouter, pg *proxy.Gateway, pool *ProxyPoolService,
+	coordinator *Coordinator, runner netx.CommandRunner) *GatewayService {
+	if runner == nil {
+		runner = netx.SystemCommandRunner{}
+	}
 	return &GatewayService{
 		cfg: cfg, nodes: nodes, settingsRepo: settingsRepo, tunnel: mgr, router: router,
-		proxy: pg, pool: pool, coordinator: coordinator, connectionEnabled: true,
+		proxy: pg, pool: pool, coordinator: coordinator, runner: runner, connectionEnabled: true,
 	}
 }
 
@@ -49,6 +54,17 @@ func NewGatewayService(cfg *config.Config, nodes *store.NodeRepository, settings
 func (g *GatewayService) Start(ctx context.Context) error {
 	g.tunnel.CleanupStaleProcesses()
 	_ = g.router.Cleanup(ctx)
+	// Devices left behind by a crashed run would otherwise make the allocator
+	// (which now refuses names already present on the host) skip them forever.
+	if removed := netx.ReclaimStaleDevices(ctx, g.runner, g.cfg.ProbeDevicePrefix); len(removed) > 0 {
+		slog.Info("reclaimed leftover tunnel devices", "module", "gateway", "devices", removed)
+	}
+	// A shared routing table is not fatal — cleanup is attribution-based — but
+	// the operator should know the id collides with another program.
+	if foreign := g.router.TableConflict(ctx); foreign > 0 {
+		slog.Warn("policy routing table is shared with another program; set FREE_PROXY_POLICY_ROUTING_TABLE to a free id",
+			"module", "gateway", "table", g.router.Table(), "foreign_routes", foreign)
+	}
 	if g.cfg.ProxyEnabled {
 		return g.proxy.Start(ctx)
 	}
@@ -84,6 +100,24 @@ func (g *GatewayService) activate(ctx context.Context, nodeID string) (domain.Tu
 		return domain.TunnelStartResult{}, err
 	}
 
+	// Release our own tunnel before testing the device name. The availability
+	// check reads the device off running processes' command lines, so it cannot
+	// tell our outgoing OpenVPN from a stranger's: with the incumbent still up,
+	// every rotation failed as "in use by another running tunnel process" and
+	// the caller blacklisted a healthy node for it. Connect tears the old tunnel
+	// down regardless — doing it here only lets the check see the truth. The
+	// validation above still runs first, so a rejected node costs no exit.
+	g.tunnel.Disconnect()
+
+	// Verify the active device name is actually free before OpenVPN gets it —
+	// the same guarantee the probe allocator gives, which the active tunnel
+	// previously went without.
+	if err := netx.EnsureDeviceAvailable(ctx, g.runner, g.cfg.ProbeDevicePrefix, g.cfg.TunnelInterface); err != nil {
+		g.setLastError(err.Error())
+		slog.Warn("tunnel device unavailable", "module", "gateway", "device", g.cfg.TunnelInterface, "err", err)
+		return domain.TunnelStartResult{}, err
+	}
+
 	result := g.tunnel.Connect(ctx, nodeID, target.ConfigText)
 	if !result.Success {
 		_ = g.nodes.MarkUnavailable(ctx, nodeID)
@@ -91,10 +125,13 @@ func (g *GatewayService) activate(ctx context.Context, nodeID string) (domain.Tu
 		slog.Warn("activation failed", "module", "gateway", "node", nodeID, "msg", result.Message)
 		return result, nil
 	}
+	// Reaching here means the node completed its handshake, so a routing failure
+	// is ours alone — marking the node unavailable for it would retire a working
+	// exit over a local fault, and every candidate after it in turn.
 	if err := g.router.Setup(ctx, g.cfg.TunnelInterface); err != nil {
 		g.tunnel.Disconnect()
-		_ = g.nodes.MarkUnavailable(ctx, nodeID)
 		g.setLastError(err.Error())
+		slog.Warn("policy routing setup failed", "module", "gateway", "node", nodeID, "err", err)
 		return domain.TunnelStartResult{}, err
 	}
 	g.setLastError("")

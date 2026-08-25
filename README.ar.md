@@ -4,6 +4,8 @@
 
 > شغّل **أمرًا واحدًا** على خادم صغير خارج بلدك، فيقوم تلقائيًا بسحب المئات من المنافذ المجانية من مصادر العقد العامة (VPNGate)، ويقيس السرعة الفعلية، ويختار بذكاء أسرع خط، ليوفّر لك بروكسي **SOCKS5 / HTTP** ثابتًا. عند انقطاع أي عقدة يتم التبديل تلقائيًا، دون حاجة إلى مراقبتك المستمرة.
 
+> 🎥 فيديو توضيحي: [YouTube](https://youtu.be/0uf9St0cBM8)
+
 <p>
   <img alt="النشر بأمر واحد" src="https://img.shields.io/badge/%D8%A7%D9%84%D9%86%D8%B4%D8%B1-%D8%A3%D9%85%D8%B1%20%D9%88%D8%A7%D8%AD%D8%AF-brightgreen">
   <img alt="Go ثنائي واحد" src="https://img.shields.io/badge/Go-%D8%AB%D9%86%D8%A7%D8%A6%D9%8A%20%D9%88%D8%A7%D8%AD%D8%AF%C2%B7%D8%A8%D9%84%D8%A7%20%D8%AA%D8%A8%D8%B9%D9%8A%D8%A7%D8%AA-00ADD8">
@@ -208,14 +210,14 @@ FREE_PROXY_DATA_DIR=/var/lib/free-proxy
 FREE_PROXY_DATABASE_URL=
 FREE_PROXY_SQL_ECHO=false
 FREE_PROXY_ALLOW_PROCESS_RESTART=true
-FREE_PROXY_PREFLIGHT_STRICT=false
 FREE_PROXY_OPENVPN_COMMAND=openvpn
 FREE_PROXY_OPENVPN_USERNAME=vpn
 FREE_PROXY_OPENVPN_PASSWORD=vpn
-FREE_PROXY_TUNNEL_INTERFACE=tun0
-FREE_PROXY_TEST_TUN_START=2
-FREE_PROXY_TEST_TUN_END=99
-FREE_PROXY_POLICY_ROUTING_TABLE=100
+FREE_PROXY_TUNNEL_INTERFACE=fpx0
+FREE_PROXY_PROBE_DEVICE_PREFIX=fpx
+FREE_PROXY_TEST_TUN_START=1
+FREE_PROXY_TEST_TUN_END=64
+FREE_PROXY_POLICY_ROUTING_TABLE=9527
 ```
 
 > Web port, proxy port, credentials, discovery, maintenance, DNS, routing, and external-access options are managed in the dashboard and stored in SQLite.
