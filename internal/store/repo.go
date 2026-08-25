@@ -270,6 +270,7 @@ func (r *NodeRepository) GetTarget(ctx context.Context, id string) (domain.Proxy
 		IPAddress:    n.IpAddress,
 		RemoteHost:   n.RemoteHost,
 		RemotePort:   int(n.RemotePort),
+		Transport:    domain.TransportProtocol(n.Transport),
 		SourcePingMS: int(n.SourcePingMs),
 		ConfigText:   n.ConfigText,
 	}, nil
@@ -277,26 +278,7 @@ func (r *NodeRepository) GetTarget(ctx context.Context, id string) (domain.Proxy
 
 // InsertDiscovered upserts a freshly discovered node.
 func (r *NodeRepository) InsertDiscovered(ctx context.Context, n domain.DiscoveredNode) error {
-	return r.q.InsertDiscoveredNode(ctx, gen.InsertDiscoveredNodeParams{
-		ID:               n.ID,
-		Provider:         n.Provider,
-		ProviderNodeID:   n.ProviderNodeID,
-		ProviderIdentity: n.ProviderIdentity,
-		Country:          n.Country,
-		CountryCode:      n.CountryCode,
-		HostName:         n.HostName,
-		IpAddress:        n.IPAddress,
-		RemoteHost:       n.RemoteHost,
-		RemotePort:       int64(n.RemotePort),
-		Transport:        string(n.Transport),
-		SourceScore:      int64(n.SourceScore),
-		SourcePingMs:     int64(n.SourcePingMS),
-		SourceSpeedBps:   n.SourceSpeedBPS,
-		SourceSessions:   int64(n.SourceSessions),
-		ConfigText:       n.ConfigText,
-		FetchedAt:        tstr(n.FetchedAt),
-		LastSeenAt:       sql.NullString{String: tstr(n.FetchedAt), Valid: true},
-	})
+	return insertDiscovered(ctx, r.q, n)
 }
 
 // MarkAllAbsent flags every node as not present in the latest source snapshot.

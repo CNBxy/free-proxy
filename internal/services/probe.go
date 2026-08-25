@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"fmt"
+	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -11,6 +13,19 @@ import (
 	"github.com/masteralanlab/free-proxy/internal/netx"
 	"github.com/masteralanlab/free-proxy/internal/store"
 	"github.com/masteralanlab/free-proxy/internal/tunnel"
+)
+
+// A TCP endpoint that refuses or drops a connect cannot carry an
+// OpenVPN-over-TCP handshake, so the probe path asks that question first. The
+// handshake itself costs a full OpenVPN process and up to the whole test
+// timeout per node; the dial costs milliseconds when answered and at most
+// tcpPrecheckTimeout when not. On a pool where most nodes are dead this turns
+// a cycle that ran tens of minutes into one that runs in seconds — the same
+// trade the liveness sweep already makes pool-wide (see liveness.go), applied
+// to the one batch path its filter cannot cover: freshly discovered nodes.
+const (
+	tcpPrecheckConcurrency = 32
+	tcpPrecheckTimeout     = 3 * time.Second
 )
 
 // ProbeService dials nodes to test connectivity and measure latency.
@@ -24,6 +39,9 @@ type ProbeService struct {
 	history     *store.ProbeResultRepository
 	coordinator *Coordinator
 	sem         chan struct{}
+	presem      chan struct{}
+	// dial backs the TCP pre-check; swapped out in tests.
+	dial func(ctx context.Context, addr string, timeout time.Duration) bool
 }
 
 // NewProbeService constructs a ProbeService.
@@ -36,6 +54,8 @@ func NewProbeService(cfg *config.Config, nodes *store.NodeRepository, mgr *tunne
 	return &ProbeService{
 		cfg: cfg, nodes: nodes, tunnel: mgr, tunAlloc: tunAlloc, runner: runner,
 		ipInfo: ipInfo, history: history, coordinator: coordinator, sem: make(chan struct{}, n),
+		presem: make(chan struct{}, tcpPrecheckConcurrency),
+		dial:   dialTCP,
 	}
 }
 
@@ -46,6 +66,10 @@ func (s *ProbeService) Probe(ctx context.Context, nodeID string, enrich bool) (d
 		return domain.ProbeResult{}, err
 	}
 	_ = s.nodes.MarkProbing(ctx, nodeID)
+
+	if s.unreachableOverTCP(ctx, target) {
+		return s.recordUnreachable(ctx, nodeID), nil
+	}
 
 	var latency int
 	var tun domain.TunnelStartResult
@@ -75,14 +99,51 @@ func (s *ProbeService) Probe(ctx context.Context, nodeID string, enrich bool) (d
 	result := domain.ProbeResult{
 		NodeID: nodeID, Available: tun.Success, LatencyMS: latency, Tunnel: tun, ProbedAt: probedAt,
 	}
-	_ = s.nodes.UpdateProbeResult(ctx, nodeID, result.Available, result.LatencyMS, probedAt)
-	if s.history != nil {
-		_, _ = s.history.Insert(ctx, result)
-	}
+	s.recordResult(ctx, nodeID, result)
 	if enrich && result.Available && s.ipInfo != nil {
 		_ = s.ipInfo.Enrich(ctx, nodeID, target.IPAddress)
 	}
 	return result, nil
+}
+
+// unreachableOverTCP reports whether a TCP-transport node refuses connections.
+// UDP endpoints have no cheap verdict (see ListTCPLivenessTargets), so they skip
+// straight to the handshake; malformed targets do too, letting OpenVPN produce
+// the authoritative failure for whatever the config really contains.
+func (s *ProbeService) unreachableOverTCP(ctx context.Context, target domain.ProxyNodeTarget) bool {
+	if target.Transport != domain.TransportTCP || target.RemoteHost == "" || target.RemotePort <= 0 {
+		return false
+	}
+	s.presem <- struct{}{}
+	defer func() { <-s.presem }()
+	addr := net.JoinHostPort(target.RemoteHost, strconv.Itoa(target.RemotePort))
+	return !s.dial(ctx, addr, tcpPrecheckTimeout)
+}
+
+// recordUnreachable closes a pre-check failure with the same bookkeeping a
+// handshake failure would get, so counters and history stay comparable.
+func (s *ProbeService) recordUnreachable(ctx context.Context, nodeID string) domain.ProbeResult {
+	code := domain.FailUnreachable
+	result := domain.ProbeResult{
+		NodeID:    nodeID,
+		Available: false,
+		Tunnel: domain.TunnelStartResult{
+			Status:         domain.TunnelFailed,
+			Message:        "Node did not answer a TCP connect; skipped the OpenVPN handshake",
+			FailureCode:    &code,
+			HandshakeStage: "starting",
+		},
+		ProbedAt: time.Now().UTC(),
+	}
+	s.recordResult(ctx, nodeID, result)
+	return result
+}
+
+func (s *ProbeService) recordResult(ctx context.Context, nodeID string, result domain.ProbeResult) {
+	_ = s.nodes.UpdateProbeResult(ctx, nodeID, result.Available, result.LatencyMS, result.ProbedAt)
+	if s.history != nil {
+		_, _ = s.history.Insert(ctx, result)
+	}
 }
 
 // ProbeMany tests several nodes concurrently (bounded by the semaphore).

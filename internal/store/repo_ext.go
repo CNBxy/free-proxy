@@ -22,27 +22,63 @@ func (r *NodeRepository) ResolveAlias(ctx context.Context, id string) string {
 
 // UpsertDiscovered upserts discovered nodes, preserving canonical ids and adding
 // aliases when a node's generated id differs from the stored one. Returns count.
+//
+// The whole batch commits as one transaction. Row-by-row auto-commit used to
+// cost two to three fsyncs per discovered node — hundreds per cycle on a
+// several-hundred-row listing — all serialized against every other writer.
 func (r *NodeRepository) UpsertDiscovered(ctx context.Context, nodes []domain.DiscoveredNode) (int, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := r.q.WithTx(tx)
 	for _, n := range nodes {
 		identity := n.ProviderIdentity
 		if identity == "" {
 			identity = n.Provider + ":" + n.IPAddress
 		}
 		n.ProviderIdentity = identity
-		existing, err := r.q.GetNodeByIdentity(ctx, gen.GetNodeByIdentityParams{Provider: n.Provider, ProviderIdentity: identity})
+		existing, err := q.GetNodeByIdentity(ctx, gen.GetNodeByIdentityParams{Provider: n.Provider, ProviderIdentity: identity})
 		if err == nil {
 			if existing.ID != n.ID {
-				_ = r.q.AddNodeAlias(ctx, gen.AddNodeAliasParams{AliasID: n.ID, NodeID: existing.ID, CreatedAt: tstr(time.Now())})
+				_ = q.AddNodeAlias(ctx, gen.AddNodeAliasParams{AliasID: n.ID, NodeID: existing.ID, CreatedAt: tstr(time.Now())})
 			}
 			n.ID = existing.ID
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return 0, err
 		}
-		if err := r.InsertDiscovered(ctx, n); err != nil {
+		if err := insertDiscovered(ctx, q, n); err != nil {
 			return 0, err
 		}
 	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
 	return len(nodes), nil
+}
+
+func insertDiscovered(ctx context.Context, q *gen.Queries, n domain.DiscoveredNode) error {
+	return q.InsertDiscoveredNode(ctx, gen.InsertDiscoveredNodeParams{
+		ID:               n.ID,
+		Provider:         n.Provider,
+		ProviderNodeID:   n.ProviderNodeID,
+		ProviderIdentity: n.ProviderIdentity,
+		Country:          n.Country,
+		CountryCode:      n.CountryCode,
+		HostName:         n.HostName,
+		IpAddress:        n.IPAddress,
+		RemoteHost:       n.RemoteHost,
+		RemotePort:       int64(n.RemotePort),
+		Transport:        string(n.Transport),
+		SourceScore:      int64(n.SourceScore),
+		SourcePingMs:     int64(n.SourcePingMS),
+		SourceSpeedBps:   n.SourceSpeedBPS,
+		SourceSessions:   int64(n.SourceSessions),
+		ConfigText:       n.ConfigText,
+		FetchedAt:        tstr(n.FetchedAt),
+		LastSeenAt:       sql.NullString{String: tstr(n.FetchedAt), Valid: true},
+	})
 }
 
 // MarkProviderSnapshot records which nodes appeared in the latest successful

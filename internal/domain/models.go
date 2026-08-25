@@ -84,12 +84,13 @@ type PoolStatistics struct {
 
 // ProxyNodeTarget carries the minimum needed to activate a node.
 type ProxyNodeTarget struct {
-	ID           string `json:"id"`
-	IPAddress    string `json:"ip_address"`
-	RemoteHost   string `json:"remote_host"`
-	RemotePort   int    `json:"remote_port"`
-	SourcePingMS int    `json:"source_ping_ms"`
-	ConfigText   string `json:"config_text"`
+	ID           string            `json:"id"`
+	IPAddress    string            `json:"ip_address"`
+	RemoteHost   string            `json:"remote_host"`
+	RemotePort   int               `json:"remote_port"`
+	Transport    TransportProtocol `json:"transport"`
+	SourcePingMS int               `json:"source_ping_ms"`
+	ConfigText   string            `json:"config_text"`
 }
 
 type DiscoveryResult struct {
