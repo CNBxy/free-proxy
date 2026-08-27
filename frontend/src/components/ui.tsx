@@ -17,6 +17,28 @@ export function Card({ title, actions, children, className = "" }: {
   );
 }
 
+// Toggle is a full row rather than a checkbox with a label beside it: on a form
+// where every other control is a full-width field, a bare checkbox is the one
+// element with no edges, and it reads as debris between the fields. The row
+// carries the same border as a field, so a column of them lines up with them.
+export function Toggle({ label, hint, checked, onChange }: {
+  label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center justify-between gap-4 rounded-md border border-rule px-3.5 py-2.5 cursor-pointer transition-colors hover:border-rule-strong">
+      <span className="min-w-0">
+        <span className="block text-sm text-ink">{label}</span>
+        {hint && <span className="block text-xs text-ink-3 mt-0.5">{hint}</span>}
+      </span>
+      <input type="checkbox" className="switch-input sr-only" checked={checked}
+        onChange={(e) => onChange(e.target.checked)} />
+      <span className={`switch ${checked ? "switch-on" : ""}`} aria-hidden="true">
+        <span className="switch-dot" />
+      </span>
+    </label>
+  );
+}
+
 export function StatTile({ label, value, tone = "default" }: {
   label: string; value: ReactNode; tone?: "default" | "ok" | "warn" | "danger";
 }) {

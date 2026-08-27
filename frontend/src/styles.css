@@ -112,6 +112,52 @@ body {
   .field:focus {
     border-color: var(--color-ink);
   }
+  /* Ports are the only numbers left in the console. The stepper arrows are
+     noise on a value nobody increments one at a time. */
+  .field-num {
+    font-variant-numeric: tabular-nums;
+    appearance: textfield;
+  }
+  .field-num::-webkit-outer-spin-button,
+  .field-num::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  /* Switch: the checkbox a browser draws is the one control on this page that
+     ignores the palette, so it is drawn here instead — monochrome, because
+     color is reserved for verdicts. The real input stays in the DOM (sr-only)
+     and keeps focus and keyboard behaviour. */
+  .switch {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    width: 2.25rem;
+    height: 1.25rem;
+    padding: 2px;
+    border-radius: 999px;
+    border: 1px solid var(--color-rule-strong);
+    background: var(--color-paper-2);
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+  .switch-dot {
+    width: 0.875rem;
+    height: 0.875rem;
+    border-radius: 999px;
+    background: var(--color-ink-3);
+    transition: transform 0.15s ease, background-color 0.15s ease;
+  }
+  .switch-on {
+    background: var(--color-ink);
+    border-color: var(--color-ink);
+  }
+  .switch-on .switch-dot {
+    background: var(--color-card);
+    transform: translateX(1rem);
+  }
+  .switch-input:focus-visible + .switch {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+  }
   .th {
     text-align: left;
     padding: 0.6rem 0.75rem;
