@@ -41,21 +41,35 @@ func NewProbeService(cfg *config.Config, nodes *store.NodeRepository, mgr *tunne
 
 // Probe tests a single node, updating its state and (optionally) enriching IP info.
 func (s *ProbeService) Probe(ctx context.Context, nodeID string, enrich bool) (domain.ProbeResult, error) {
-	target, err := s.nodes.GetTarget(ctx, nodeID)
-	if err != nil {
-		return domain.ProbeResult{}, err
-	}
-	_ = s.nodes.MarkProbing(ctx, nodeID)
-
 	var latency int
 	var tun domain.TunnelStartResult
-	func() {
-		s.sem <- struct{}{}
+	var ipAddress string
+
+	err := func() error {
+		// The semaphore covers everything, not just the OpenVPN dial. ProbeMany
+		// starts one goroutine per node, so whatever sits above this line runs at
+		// the full width of the batch — and that used to include loading the
+		// node's target, whose config text is a few KB apiece, and a MarkProbing
+		// write that SQLite serializes anyway. A 200-node cycle held 200 configs
+		// in memory to keep five probes busy.
+		select {
+		case s.sem <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 		defer func() { <-s.sem }()
+
+		target, err := s.nodes.GetTarget(ctx, nodeID)
+		if err != nil {
+			return err
+		}
+		ipAddress = target.IPAddress
+		_ = s.nodes.MarkProbing(ctx, nodeID)
+
 		device, release, allocErr := s.tunAlloc.Allocate()
 		if allocErr != nil {
 			tun = failureResult(allocErr)
-			return
+			return nil
 		}
 		defer release()
 		var wg sync.WaitGroup
@@ -69,7 +83,11 @@ func (s *ProbeService) Probe(ctx context.Context, nodeID string, enrich bool) (d
 			tun = s.tunnel.Probe(ctx, target.ConfigText, device)
 		}()
 		wg.Wait()
+		return nil
 	}()
+	if err != nil {
+		return domain.ProbeResult{}, err
+	}
 
 	probedAt := time.Now().UTC()
 	result := domain.ProbeResult{
@@ -80,7 +98,7 @@ func (s *ProbeService) Probe(ctx context.Context, nodeID string, enrich bool) (d
 		_, _ = s.history.Insert(ctx, result)
 	}
 	if enrich && result.Available && s.ipInfo != nil {
-		_ = s.ipInfo.Enrich(ctx, nodeID, target.IPAddress)
+		_ = s.ipInfo.Enrich(ctx, nodeID, ipAddress)
 	}
 	return result, nil
 }

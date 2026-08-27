@@ -17,6 +17,8 @@ type MaintenanceService struct {
 	cfg          *config.Config
 	nodes        *store.NodeRepository
 	settingsRepo *store.SettingsRepository
+	probes       *store.ProbeResultRepository
+	jobs         *store.JobRepository
 	discovery    *DiscoveryService
 	probe        *ProbeService
 	pool         *ProxyPoolService
@@ -28,10 +30,12 @@ type MaintenanceService struct {
 
 // NewMaintenanceService constructs a MaintenanceService.
 func NewMaintenanceService(cfg *config.Config, nodes *store.NodeRepository, settingsRepo *store.SettingsRepository,
+	probes *store.ProbeResultRepository, jobs *store.JobRepository,
 	discovery *DiscoveryService, probe *ProbeService, pool *ProxyPoolService, gateway *GatewayService,
 	autoSwitch *AutoSwitchService, coordinator *Coordinator) *MaintenanceService {
 	return &MaintenanceService{
-		cfg: cfg, nodes: nodes, settingsRepo: settingsRepo, discovery: discovery, probe: probe,
+		cfg: cfg, nodes: nodes, settingsRepo: settingsRepo, probes: probes, jobs: jobs,
+		discovery: discovery, probe: probe,
 		pool: pool, gateway: gateway, autoSwitch: autoSwitch, coordinator: coordinator,
 	}
 }
@@ -61,6 +65,7 @@ func (m *MaintenanceService) run(ctx context.Context) (domain.MaintenanceResult,
 	defer m.mu.Unlock()
 	slog.Info("starting periodic maintenance", "module", "maintenance")
 	_ = m.nodes.ClearExpiredBlacklist(ctx)
+	m.pruneHistory(ctx)
 	// A provider fetch that fails must not cost the cycle its probe pass: probing
 	// reads the stored pool and does not need the provider to answer. Aborting
 	// here used to drop a whole 200-node pass over a transient network error.
@@ -144,6 +149,30 @@ func (m *MaintenanceService) run(ctx context.Context) (domain.MaintenanceResult,
 		}
 	}
 	return m.result(ctx, discovery.Discovered, probed)
+}
+
+// pruneHistory enforces the retention window on the two append-only tables. It
+// rides the maintenance cycle because that is already the pass that spends time
+// on pool upkeep, and it is advisory: a cycle should not lose its probe pass
+// because a delete failed.
+func (m *MaintenanceService) pruneHistory(ctx context.Context) {
+	cutoff := time.Now().Add(-store.HistoryRetention)
+	var probes, jobs int64
+	if m.probes != nil {
+		var err error
+		if probes, err = m.probes.DeleteOlderThan(ctx, cutoff); err != nil {
+			slog.Warn("probe history prune failed", "module", "maintenance", "err", err)
+		}
+	}
+	if m.jobs != nil {
+		var err error
+		if jobs, err = m.jobs.DeleteOlderThan(ctx, cutoff); err != nil {
+			slog.Warn("job history prune failed", "module", "maintenance", "err", err)
+		}
+	}
+	if probes > 0 || jobs > 0 {
+		slog.Info("pruned expired history", "module", "maintenance", "probe_results", probes, "jobs", jobs)
+	}
 }
 
 // probeBudget caps how many nodes one maintenance cycle hands to the OpenVPN

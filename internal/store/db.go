@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
@@ -17,6 +18,17 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
+// Connection pool bounds. database/sql opens connections without limit by
+// default, and each SQLite connection carries its own page cache. The callers
+// here are bursty — a probe pass fanning out across the pool, the proxy gateway
+// admitting hundreds of clients at once — so the ceiling used to be set by the
+// size of the burst rather than by the host. Writes serialize on the file
+// regardless, and the DSN carries a 5s busy_timeout for the waiting.
+const (
+	maxOpenConns = 16
+	maxIdleConns = 8
+)
+
 // Open opens the SQLite database (modernc pure-Go driver, no CGO). The DSN is
 // expected to carry the WAL/busy_timeout pragmas set in config.
 func Open(dsn string) (*sql.DB, error) {
@@ -24,6 +36,9 @@ func Open(dsn string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxIdleConns)
+	db.SetConnMaxIdleTime(5 * time.Minute)
 	if err := db.PingContext(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("open database: %w", err)

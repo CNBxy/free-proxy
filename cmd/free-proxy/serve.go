@@ -90,7 +90,8 @@ func buildDeps(ctx context.Context, cfg *config.Config, repos *store.Repos, auth
 
 	tunAlloc, _ := netx.NewTunAllocator(cfg.ProbeDevicePrefix, cfg.TestTunStart, cfg.TestTunEnd)
 	probe := services.NewProbeService(cfg, repos.Nodes, tunnelMgr, tunAlloc, runner, ipInfo, repos.Probes, coordinator)
-	maintenance := services.NewMaintenanceService(cfg, repos.Nodes, repos.Settings, discovery, probe, pool, gateway, autoSwitch, coordinator)
+	maintenance := services.NewMaintenanceService(cfg, repos.Nodes, repos.Settings, repos.Probes, repos.Jobs,
+		discovery, probe, pool, gateway, autoSwitch, coordinator)
 	liveness := services.NewLivenessService(repos.Nodes, gateway)
 
 	return &api.Deps{

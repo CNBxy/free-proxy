@@ -85,6 +85,17 @@ func (Runner) Start(ctx context.Context, p StartParams) (domain.TunnelStartResul
 	termFailCh := make(chan struct{}, 1)
 	scanDone := make(chan struct{})
 
+	// Probes are the log volume: the pool is probed continuously and every start
+	// prints ~30 lines of OpenVPN boilerplate, which came to 99% of everything
+	// this service logged — enough to rotate the journal past the entries worth
+	// reading. Their output still reaches a failed probe's result through
+	// LogTail, so demoting it loses nothing. The live tunnel keeps logging at
+	// Info: when it drops, its last lines are the only account of why.
+	logLine := slog.Debug
+	if p.KeepAlive {
+		logLine = slog.Info
+	}
+
 	go func() {
 		defer close(scanDone)
 		sc := bufio.NewScanner(pr)
@@ -92,7 +103,7 @@ func (Runner) Start(ctx context.Context, p StartParams) (domain.TunnelStartResul
 		for sc.Scan() {
 			line := sc.Text()
 			tail.append(line)
-			slog.Info(line, "module", "openvpn")
+			logLine(line, "module", "openvpn")
 			if IsReady(line) {
 				select {
 				case readyCh <- struct{}{}:
