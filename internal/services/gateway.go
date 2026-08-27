@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/masteralanlab/free-proxy/internal/config"
 	"github.com/masteralanlab/free-proxy/internal/domain"
@@ -34,7 +35,10 @@ type GatewayService struct {
 	exitIP            string
 	exitLatencyMS     int
 	connectionEnabled bool
-	onUnexpectedExit  func(context.Context)
+	// activeSince timestamps the current exit's activation, so an unexpected
+	// exit can report how long the tunnel actually lasted.
+	activeSince      time.Time
+	onUnexpectedExit func(nodeID string, uptime time.Duration)
 }
 
 // NewGatewayService constructs a GatewayService.
@@ -137,6 +141,7 @@ func (g *GatewayService) activate(ctx context.Context, nodeID string) (domain.Tu
 	g.setLastError("")
 	g.mu.Lock()
 	g.activeLatencyMS = 0
+	g.activeSince = time.Now()
 	g.mu.Unlock()
 	slog.Info("exit node activated", "module", "gateway", "node", nodeID)
 	return result, nil
@@ -175,6 +180,7 @@ func (g *GatewayService) disconnectOnly(ctx context.Context) {
 	g.activeLatencyMS = 0
 	g.exitIP = ""
 	g.exitLatencyMS = 0
+	g.activeSince = time.Time{}
 	g.mu.Unlock()
 	if activeID != "" {
 		slog.Info("exit node disconnected", "module", "gateway", "node", activeID)
@@ -211,22 +217,36 @@ func (g *GatewayService) UpdateHealth(exitIP string, latencyMS int) {
 	g.mu.Unlock()
 }
 
-// SetUnexpectedExitHandler wires the callback for unexpected tunnel exits.
-func (g *GatewayService) SetUnexpectedExitHandler(h func(context.Context)) {
+// SetUnexpectedExitHandler wires the callback for unexpected tunnel exits. The
+// handler brings its own context: this one fires from the process reaper, which
+// has no request or lifetime to borrow, and the recovery it triggers may sleep
+// for minutes before touching the database — so it has to be cancellable by
+// whoever owns the service, not by a Background this method would invent.
+func (g *GatewayService) SetUnexpectedExitHandler(h func(nodeID string, uptime time.Duration)) {
 	g.mu.Lock()
 	g.onUnexpectedExit = h
 	g.mu.Unlock()
 	g.tunnel.SetExitHandler(g.handleUnexpectedExit)
 }
 
+// handleUnexpectedExit tears the dead exit down and hands the recovery decision
+// on. The node id and the tunnel's uptime go with it: ClearExitedProcess wipes
+// the active id, so a handler that asked afterwards could not tell which node
+// had just failed — and would happily select it again.
 func (g *GatewayService) handleUnexpectedExit(code int) {
-	if g.tunnel.ActiveNodeID() == "" {
+	nodeID := g.tunnel.ActiveNodeID()
+	if nodeID == "" {
 		return
 	}
 	ctx := context.Background()
 	g.setLastError(fmt.Sprintf("OpenVPN exited unexpectedly (code=%d)", code))
 	_ = g.router.Cleanup(ctx)
 	g.mu.Lock()
+	var uptime time.Duration
+	if !g.activeSince.IsZero() {
+		uptime = time.Since(g.activeSince)
+	}
+	g.activeSince = time.Time{}
 	g.activeLatencyMS = 0
 	g.exitIP = ""
 	g.exitLatencyMS = 0
@@ -234,7 +254,7 @@ func (g *GatewayService) handleUnexpectedExit(code int) {
 	g.mu.Unlock()
 	g.tunnel.ClearExitedProcess()
 	if h != nil {
-		h(ctx)
+		h(nodeID, uptime)
 	}
 }
 

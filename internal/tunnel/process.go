@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -176,20 +175,17 @@ type Managed struct {
 	intentional bool
 	onExit      func(code int)
 
-	running atomic.Bool
-	done    chan struct{}
+	done chan struct{}
 }
 
 func newManaged(cmd *exec.Cmd, pr *os.File, configPath, device string, tail *ring) *Managed {
 	m := &Managed{cmd: cmd, pr: pr, configPath: configPath, device: device, tail: tail, done: make(chan struct{})}
-	m.running.Store(true)
 	go m.watch()
 	return m
 }
 
 func (m *Managed) watch() {
 	err := m.cmd.Wait()
-	m.running.Store(false)
 	close(m.done)
 	m.mu.Lock()
 	intentional := m.intentional
@@ -200,8 +196,12 @@ func (m *Managed) watch() {
 	}
 }
 
-// Running reports whether the process is still alive.
-func (m *Managed) Running() bool { return m.running.Load() }
+// Running reports whether the process is still alive. It reads the same channel
+// exited() does, deliberately: a separate flag was cleared just before the
+// channel closed, and in that window ClearExitedProcess saw a finished process
+// while Stop still believed the pid was live — and signalled a process group the
+// kernel was already free to reassign.
+func (m *Managed) Running() bool { return !m.exited() }
 
 // Device returns the tunnel device name.
 func (m *Managed) Device() string { return m.device }

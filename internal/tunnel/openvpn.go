@@ -137,10 +137,17 @@ func (m *Manager) SetExitHandler(h func(code int)) {
 }
 
 // ClearExitedProcess drops a reference to a process that already exited.
+//
+// Stop is what owns the cleanup that outlives the process — closing the output
+// pipe and removing the generated .ovpn file — and dropping the reference
+// without it leaked one file descriptor and one config file per unexpected
+// exit. That is precisely the path a flapping node takes, over and over. Stop is
+// safe here: the child has been reaped, so it signals nothing and only releases.
 func (m *Manager) ClearExitedProcess() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.active != nil && !m.active.Running() {
+		m.active.Stop()
 		m.active = nil
 		m.activeNodeID = ""
 	}

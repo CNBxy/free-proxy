@@ -76,7 +76,13 @@ func buildDeps(ctx context.Context, cfg *config.Config, repos *store.Repos, auth
 	pool := services.NewProxyPoolService(repos.Nodes, repos.Settings)
 	gateway := services.NewGatewayService(cfg, repos.Nodes, repos.Settings, tunnelMgr, router, proxyGateway, pool, coordinator, runner)
 	autoSwitch := services.NewAutoSwitchService(cfg, repos.Nodes, repos.Settings, pool, gateway)
-	gateway.SetUnexpectedExitHandler(autoSwitch.HandleUnexpectedExit)
+	// The reconnect backs off, so it can still be waiting when the process is
+	// asked to stop. It gets the lifetime context rather than a Background one,
+	// so shutdown ends the wait instead of letting it reconnect into a teardown
+	// that is already under way.
+	gateway.SetUnexpectedExitHandler(func(nodeID string, uptime time.Duration) {
+		autoSwitch.HandleUnexpectedExit(ctx, nodeID, uptime)
+	})
 
 	healthChecker := netx.NewHealthChecker(adminCfg.ProxyHost, adminCfg.ProxyPort, healthUsername, healthPassword, cfg.ProxyConnectTimeout())
 	health := services.NewHealthService(cfg, healthChecker, repos.Nodes, repos.Settings, gateway, autoSwitch)
