@@ -30,9 +30,9 @@ func buildDeps(ctx context.Context, cfg *config.Config, repos *store.Repos, auth
 	coordinator := services.NewCoordinator()
 	jobs := services.NewJobService(repos.Jobs, ctx)
 
-	provider := vpngate.NewProvider(cfg)
-	ipClient := ipinfo.New(cfg.IPInfoAPIURL, cfg.RequestTimeout())
-	ipInfo := services.NewIpInfoService(cfg, ipClient, repos.Nodes, repos.IPCache)
+	provider := vpngate.NewProvider()
+	ipClient := ipinfo.New(config.IPInfoAPIURL, config.RequestTimeout)
+	ipInfo := services.NewIpInfoService(ipClient, repos.Nodes, repos.IPCache)
 	diagnostics := services.NewDiagnosticsService(cfg, runner)
 	discovery := services.NewDiscoveryService(provider, repos.Nodes)
 
@@ -40,8 +40,8 @@ func buildDeps(ctx context.Context, cfg *config.Config, repos *store.Repos, auth
 	router := netx.NewPolicyRouter(runner, netx.PolicyRouterConfig{
 		Table: cfg.PolicyRoutingTable, Interface: cfg.TunnelInterface,
 		DevicePrefix: cfg.ProbeDevicePrefix,
-		SetupRetries: cfg.RoutingSetupRetries, RetryInterval: cfg.RoutingRetryInterval(),
-		StrictRPF: cfg.RoutingStrictRPFilter,
+		SetupRetries: config.RoutingSetupRetries, RetryInterval: config.RoutingRetryInterval,
+		StrictRPF: config.RoutingStrictRPFilter,
 	})
 
 	adminCfg := auth.Store.Config()
@@ -51,14 +51,14 @@ func buildDeps(ctx context.Context, cfg *config.Config, repos *store.Repos, auth
 	// authentication. These values exist only for this process lifetime.
 	healthUsername := security.RandomCredential(32)
 	healthPassword := security.RandomCredential(32)
-	connector := proxy.NewSocketConnector(cfg.TunnelInterface, cfg.ProxyDNSServer, cfg.ProxyConnectTimeout())
+	connector := proxy.NewSocketConnector(cfg.TunnelInterface, config.ProxyDNSServer, config.ProxyConnectTimeout)
 	// Both of these run on every accepted proxy connection, so neither may go to
 	// the database or to scrypt unconditionally — see ProxyAuthenticator.
 	proxyAuth := security.NewProxyAuthenticator(repos.App)
 	proxyGateway := proxy.New(proxy.Options{
 		Host: "0.0.0.0", Port: adminCfg.ProxyPort,
-		MaxConnections: cfg.ProxyMaxConnections,
-		ConnectTimeout: cfg.ProxyConnectTimeout(), IdleTimeout: cfg.ProxyIdleTimeout(),
+		MaxConnections: config.ProxyMaxConnections,
+		ConnectTimeout: config.ProxyConnectTimeout, IdleTimeout: config.ProxyIdleTimeout,
 		// Fails closed on a database read error. The internal health credential
 		// remains usable so monitoring does not trigger a false recovery.
 		AuthRequired: proxyAuth.Required,
@@ -75,7 +75,7 @@ func buildDeps(ctx context.Context, cfg *config.Config, repos *store.Repos, auth
 
 	pool := services.NewProxyPoolService(repos.Nodes, repos.Settings)
 	gateway := services.NewGatewayService(cfg, repos.Nodes, repos.Settings, tunnelMgr, router, proxyGateway, pool, coordinator, runner)
-	autoSwitch := services.NewAutoSwitchService(cfg, repos.Nodes, repos.Settings, pool, gateway)
+	autoSwitch := services.NewAutoSwitchService(repos.Nodes, repos.Settings, pool, gateway)
 	// The reconnect backs off, so it can still be waiting when the process is
 	// asked to stop. It gets the lifetime context rather than a Background one,
 	// so shutdown ends the wait instead of letting it reconnect into a teardown
@@ -84,13 +84,13 @@ func buildDeps(ctx context.Context, cfg *config.Config, repos *store.Repos, auth
 		autoSwitch.HandleUnexpectedExit(ctx, nodeID, uptime)
 	})
 
-	healthChecker := netx.NewHealthChecker(adminCfg.ProxyHost, adminCfg.ProxyPort, healthUsername, healthPassword, cfg.ProxyConnectTimeout())
-	health := services.NewHealthService(cfg, healthChecker, repos.Nodes, repos.Settings, gateway, autoSwitch)
+	healthChecker := netx.NewHealthChecker(adminCfg.ProxyHost, adminCfg.ProxyPort, healthUsername, healthPassword, config.ProxyConnectTimeout)
+	health := services.NewHealthService(healthChecker, repos.Nodes, repos.Settings, gateway, autoSwitch)
 	settingsSvc := services.NewSettingsService(repos.Nodes, repos.Settings, pool, gateway, autoSwitch, coordinator)
 
 	tunAlloc, _ := netx.NewTunAllocator(cfg.ProbeDevicePrefix, cfg.TestTunStart, cfg.TestTunEnd)
-	probe := services.NewProbeService(cfg, repos.Nodes, tunnelMgr, tunAlloc, runner, ipInfo, repos.Probes, coordinator)
-	maintenance := services.NewMaintenanceService(cfg, repos.Nodes, repos.Settings, repos.Probes, repos.Jobs,
+	probe := services.NewProbeService(repos.Nodes, tunnelMgr, tunAlloc, runner, ipInfo, repos.Probes, coordinator)
+	maintenance := services.NewMaintenanceService(repos.Nodes, repos.Settings, repos.Probes, repos.Jobs,
 		discovery, probe, pool, gateway, autoSwitch, coordinator)
 	liveness := services.NewLivenessService(repos.Nodes, gateway)
 
@@ -100,9 +100,9 @@ func buildDeps(ctx context.Context, cfg *config.Config, repos *store.Repos, auth
 		Gateway: gateway, Pool: pool, Settings: settingsSvc, Health: health,
 		Diagnostics: diagnostics, Maintenance: maintenance, AutoSwitch: autoSwitch,
 		Liveness:         liveness,
-		MaintenanceMon:   services.NewMaintenanceMonitor(cfg, maintenance, gateway),
-		ActiveLatencyMon: services.NewActiveLatencyMonitor(cfg, repos.Nodes, gateway, runner),
-		HealthMon:        services.NewHealthMonitor(cfg, health, gateway),
+		MaintenanceMon:   services.NewMaintenanceMonitor(maintenance, gateway),
+		ActiveLatencyMon: services.NewActiveLatencyMonitor(repos.Nodes, gateway, runner),
+		HealthMon:        services.NewHealthMonitor(health, gateway),
 		LivenessMon:      services.NewLivenessMonitor(liveness),
 	}
 }
@@ -134,7 +134,7 @@ func runServe(ctx context.Context, cfg *config.Config, hostOverride string, port
 	if err != nil {
 		return err
 	}
-	auth := security.NewAuthService(cfg, adminStore, security.NewSessionManager(cfg.SessionTTL()))
+	auth := security.NewAuthService(cfg, adminStore, security.NewSessionManager(config.SessionTTL))
 	adminCfg := adminStore.Config()
 
 	deps := buildDeps(ctx, cfg, repos, auth, logs)
@@ -153,15 +153,14 @@ func runServe(ctx context.Context, cfg *config.Config, hostOverride string, port
 		slog.Error("proxy gateway did not start", "module", "serve", "err", err)
 	}
 
+	// Background upkeep is no longer switchable. Maintenance is what keeps the
+	// pool worth selecting from — without it the node list ages into a set of
+	// exits that no longer answer — so an install that turns it off is an install
+	// that stops working a few hours later.
 	go deps.HealthMon.Run(ctx)
 	go deps.ActiveLatencyMon.Run(ctx)
-	// The sweep is pool upkeep, so it rides the existing maintenance switch:
-	// turning maintenance off already means "stop working the pool in the
-	// background", and that should silence the dialling too.
-	if cfg.MaintenanceEnabled {
-		go deps.MaintenanceMon.Run(ctx)
-		go deps.LivenessMon.Run(ctx)
-	}
+	go deps.MaintenanceMon.Run(ctx)
+	go deps.LivenessMon.Run(ctx)
 
 	// Bind all interfaces; external web access is gated at runtime by the admin
 	// toggle (default on) — see api.ExternalAccessGuard. A --host flag still wins.

@@ -62,7 +62,6 @@ func (s *MonitorState) AsMap() map[string]any {
 
 // HealthService checks the proxy exit and recovers by rotating on failure.
 type HealthService struct {
-	cfg          *config.Config
 	checker      *netx.HealthChecker
 	nodes        *store.NodeRepository
 	settingsRepo *store.SettingsRepository
@@ -71,8 +70,8 @@ type HealthService struct {
 }
 
 // NewHealthService constructs a HealthService.
-func NewHealthService(cfg *config.Config, checker *netx.HealthChecker, nodes *store.NodeRepository, settingsRepo *store.SettingsRepository, gateway *GatewayService, autoSwitch *AutoSwitchService) *HealthService {
-	return &HealthService{cfg: cfg, checker: checker, nodes: nodes, settingsRepo: settingsRepo, gateway: gateway, autoSwitch: autoSwitch}
+func NewHealthService(checker *netx.HealthChecker, nodes *store.NodeRepository, settingsRepo *store.SettingsRepository, gateway *GatewayService, autoSwitch *AutoSwitchService) *HealthService {
+	return &HealthService{checker: checker, nodes: nodes, settingsRepo: settingsRepo, gateway: gateway, autoSwitch: autoSwitch}
 }
 
 // Check runs a health check; when recover is set, it rotates away from a failing exit.
@@ -99,7 +98,7 @@ func (h *HealthService) Check(ctx context.Context, recover bool) domain.ProxyHea
 		if result.Error != nil {
 			msg = *result.Error
 		}
-		_ = h.nodes.Blacklist(ctx, *active, msg, h.cfg.InvalidBackoff())
+		_ = h.nodes.Blacklist(ctx, *active, msg, config.InvalidBackoff)
 		slog.Warn("active node entered cooldown after health failure", "module", "health", "node", *active)
 		_, _ = h.autoSwitch.Switch(ctx)
 	}
@@ -122,20 +121,19 @@ func (h *HealthService) Recover(ctx context.Context) {
 
 // HealthMonitor periodically runs Check.
 type HealthMonitor struct {
-	cfg     *config.Config
 	health  *HealthService
 	gateway *GatewayService
 	State   MonitorState
 }
 
 // NewHealthMonitor constructs a HealthMonitor.
-func NewHealthMonitor(cfg *config.Config, health *HealthService, gateway *GatewayService) *HealthMonitor {
-	return &HealthMonitor{cfg: cfg, health: health, gateway: gateway}
+func NewHealthMonitor(health *HealthService, gateway *GatewayService) *HealthMonitor {
+	return &HealthMonitor{health: health, gateway: gateway}
 }
 
 // Run loops until ctx is cancelled.
 func (m *HealthMonitor) Run(ctx context.Context) {
-	t := time.NewTicker(m.cfg.HealthCheckInterval())
+	t := time.NewTicker(config.HealthCheckInterval)
 	defer t.Stop()
 	for {
 		select {

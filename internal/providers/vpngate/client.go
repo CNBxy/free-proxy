@@ -26,12 +26,12 @@ type Provider struct {
 	LastStats ParseStats
 }
 
-// NewProvider builds a Provider from config.
-func NewProvider(cfg *config.Config) *Provider {
+// NewProvider builds a Provider over the VPN Gate endpoint.
+func NewProvider() *Provider {
 	return &Provider{
-		apiURL:  cfg.VPNGateAPIURL,
-		limit:   cfg.DiscoveryLimit,
-		timeout: cfg.RequestTimeout(),
+		apiURL:  config.VPNGateAPIURL,
+		limit:   config.DiscoveryLimit,
+		timeout: config.RequestTimeout,
 		now:     time.Now,
 	}
 }

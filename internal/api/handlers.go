@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/masteralanlab/free-proxy/internal/config"
 	"github.com/masteralanlab/free-proxy/internal/domain"
 	"github.com/masteralanlab/free-proxy/internal/security"
 	"github.com/masteralanlab/free-proxy/internal/store"
@@ -47,7 +48,7 @@ func (h *Handlers) Login(c *echo.Context) error {
 	c.SetCookie(&http.Cookie{
 		Name: "session", Value: token, Path: h.cookiePath(),
 		HttpOnly: true, SameSite: http.SameSiteLaxMode,
-		MaxAge: int(h.Deps.Cfg.SessionTTL().Seconds()),
+		MaxAge: int(config.SessionTTL.Seconds()),
 	})
 	return c.JSON(http.StatusOK, map[string]bool{"ok": true})
 }
@@ -193,8 +194,8 @@ func (h *Handlers) ProbeMultiple(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusConflict, "Another network operation is running")
 	}
 	ids := dedupeNonEmpty(req.IDs)
-	if len(ids) > h.Deps.Cfg.ManualTestNodeLimit {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("At most %d nodes can be tested at once", h.Deps.Cfg.ManualTestNodeLimit))
+	if len(ids) > config.ManualTestNodeLimit {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("At most %d nodes can be tested at once", config.ManualTestNodeLimit))
 	}
 	job, err := h.Deps.Jobs.Submit(c.Request().Context(), "probe-proxies", h.Deps.Probe.ProbeManyJob(ids))
 	if err != nil {
@@ -458,22 +459,8 @@ func validateSystemConfig(s domain.AppSettings) error {
 	if s.Admin.WebPort < 1 || s.Admin.WebPort > 65535 || s.Proxy.Port < 1 || s.Proxy.Port > 65535 {
 		return fmt.Errorf("端口范围需为 1-65535")
 	}
-	if s.Admin.SessionTTLSeconds < 60 || s.Proxy.MaxConnections < 1 || s.Discovery.DiscoveryLimit < 1 || s.Discovery.DiscoveryLimit > 1000 {
-		return fmt.Errorf("配置数值超出有效范围")
-	}
-	if s.Proxy.ConnectTimeoutSeconds <= 0 || s.Proxy.IdleTimeoutSeconds <= 0 || s.Discovery.RequestTimeoutSecs <= 0 || s.Maintenance.MaintenanceIntervalSeconds < 60 {
-		return fmt.Errorf("时间间隔需大于有效最小值")
-	}
-	if s.Maintenance.HealthCheckIntervalSeconds <= 0 || s.Maintenance.ActivePingIntervalSeconds <= 0 || s.Maintenance.DisconnectedRetrySeconds <= 0 ||
-		s.Maintenance.OpenVPNTestTimeoutSeconds <= 0 || s.Maintenance.OpenVPNConnectTimeoutSeconds <= 0 || s.Network.RoutingRetryIntervalSeconds <= 0 ||
-		s.Discovery.IPInfoCacheSeconds < 1 || s.Maintenance.InvalidBackoffSeconds < 1 || s.Maintenance.StaleNodeGraceSeconds < 1 {
-		return fmt.Errorf("检测、缓存、退避和重试时间需大于 0")
-	}
-	if s.Maintenance.MaxProbeConcurrency < 1 || s.Maintenance.InitialConnectTestLimit < 1 || s.Maintenance.ManualTestNodeLimit < 1 || s.Network.RoutingSetupRetries < 1 {
-		return fmt.Errorf("并发数、检测数和重试数需大于 0")
-	}
-	if s.Proxy.DNSServer == "" || s.Discovery.VPNGateAPIURL == "" || s.Discovery.IPInfoAPIURL == "" {
-		return fmt.Errorf("代理 DNS 和数据源地址为必填项")
+	if s.Admin.WebPort == s.Proxy.Port {
+		return fmt.Errorf("网页端口与代理端口不能相同")
 	}
 	return nil
 }
@@ -494,7 +481,7 @@ func (h *Handlers) SystemStatus(c *echo.Context) error {
 	}
 	op, waiting, _ := h.Deps.Coordinator.Snapshot()
 	return c.JSON(http.StatusOK, map[string]any{
-		"name":            h.Deps.Cfg.AppName,
+		"name":            config.AppName,
 		"version":         h.Deps.Version,
 		"environment":     h.Deps.Cfg.Environment,
 		"status":          "running",

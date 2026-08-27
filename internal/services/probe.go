@@ -15,7 +15,6 @@ import (
 
 // ProbeService dials nodes to test connectivity and measure latency.
 type ProbeService struct {
-	cfg         *config.Config
 	nodes       *store.NodeRepository
 	tunnel      *tunnel.Manager
 	tunAlloc    *netx.TunAllocator
@@ -27,15 +26,15 @@ type ProbeService struct {
 }
 
 // NewProbeService constructs a ProbeService.
-func NewProbeService(cfg *config.Config, nodes *store.NodeRepository, mgr *tunnel.Manager, tunAlloc *netx.TunAllocator,
+func NewProbeService(nodes *store.NodeRepository, mgr *tunnel.Manager, tunAlloc *netx.TunAllocator,
 	runner netx.CommandRunner, ipInfo *IpInfoService, history *store.ProbeResultRepository, coordinator *Coordinator) *ProbeService {
-	n := cfg.MaxProbeConcurrency
-	if n < 1 {
-		n = 1
-	}
+	// The floor this used to keep is gone with the setting that could underrun
+	// it: MaxProbeConcurrency is a constant now, so a zero-width semaphore is a
+	// compile-time-visible mistake rather than something an operator can type.
 	return &ProbeService{
-		cfg: cfg, nodes: nodes, tunnel: mgr, tunAlloc: tunAlloc, runner: runner,
-		ipInfo: ipInfo, history: history, coordinator: coordinator, sem: make(chan struct{}, n),
+		nodes: nodes, tunnel: mgr, tunAlloc: tunAlloc, runner: runner,
+		ipInfo: ipInfo, history: history, coordinator: coordinator,
+		sem: make(chan struct{}, config.MaxProbeConcurrency),
 	}
 }
 

@@ -63,7 +63,7 @@ func discoverCmd() *cobra.Command {
 				return err
 			}
 			defer db.Close()
-			provider := vpngate.NewProvider(cfg)
+			provider := vpngate.NewProvider()
 			svc := services.NewDiscoveryService(provider, repos.Nodes)
 			res, err := svc.Discover(cmd.Context())
 			if err != nil {

@@ -62,7 +62,6 @@ func TestInvalidNamingIsRejectedAtLoad(t *testing.T) {
 		{"long device", map[string]string{"FREE_PROXY_TUNNEL_INTERFACE": strings.Repeat("a", 20)}, "kernel limit"},
 		{"device with space", map[string]string{"FREE_PROXY_TUNNEL_INTERFACE": "bad name"}, "characters"},
 		{"long prefix", map[string]string{"FREE_PROXY_PROBE_DEVICE_PREFIX": strings.Repeat("p", 20)}, "too long"},
-		{"inverted range", map[string]string{"FREE_PROXY_TEST_TUN_START": "9", "FREE_PROXY_TEST_TUN_END": "3"}, "must not exceed"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -78,24 +77,24 @@ func TestInvalidNamingIsRejectedAtLoad(t *testing.T) {
 }
 
 // The live exit's device must never be inside the probe pool, or a probe would
-// be handed the name the active tunnel already holds.
+// be handed the name the active tunnel already holds. The range is a constant
+// now, so the only way they can collide is an operator moving the tunnel onto a
+// probe index — and then it is the pool that has to yield.
 func TestActiveDeviceIsExcludedFromProbeRange(t *testing.T) {
-	cfg, err := loadWith(t, map[string]string{
-		"FREE_PROXY_TEST_TUN_START": "0",
-		"FREE_PROXY_TEST_TUN_END":   "8",
-	})
+	cfg, err := loadWith(t, nil)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.TestTunStart != 1 {
-		t.Errorf("TestTunStart = %d, want 1 so the probe pool clears %s", cfg.TestTunStart, cfg.TunnelInterface)
+	if cfg.TestTunStart != ProbeDeviceRangeStart || cfg.TestTunEnd != ProbeDeviceRangeEnd {
+		t.Errorf("probe range = %d-%d, want the constants %d-%d",
+			cfg.TestTunStart, cfg.TestTunEnd, ProbeDeviceRangeStart, ProbeDeviceRangeEnd)
 	}
 
-	if _, err := loadWith(t, map[string]string{
-		"FREE_PROXY_TUNNEL_INTERFACE": "fpx5",
-		"FREE_PROXY_TEST_TUN_START":   "1",
-		"FREE_PROXY_TEST_TUN_END":     "8",
-	}); err == nil {
-		t.Error("an active device inside the probe range should be rejected")
+	moved, err := loadWith(t, map[string]string{"FREE_PROXY_TUNNEL_INTERFACE": naming.DevicePrefix + "5"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if moved.TestTunStart != 6 {
+		t.Errorf("TestTunStart = %d, want 6 so the probe pool clears %s", moved.TestTunStart, moved.TunnelInterface)
 	}
 }

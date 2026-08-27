@@ -10,84 +10,58 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/caarlos0/env/v11"
 
 	"github.com/masteralanlab/free-proxy/internal/naming"
 )
 
-// Config holds all runtime settings. Field env tags omit the FREE_PROXY_
-// prefix; it is applied globally in Load via env.Options.Prefix.
+// Config holds the values that are not fixed at build time: where this install
+// keeps its data, who administers it, and where it listens. Everything else the
+// program needs to decide is a constant in tuning.go.
+//
+// Field env tags omit the FREE_PROXY_ prefix; it is applied globally in Load via
+// env.Options.Prefix.
 type Config struct {
-	AppName     string `env:"APP_NAME" envDefault:"Free Proxy"`
 	Environment string `env:"ENVIRONMENT" envDefault:"development"`
 	DataDir     string `env:"DATA_DIR" envDefault:"free_proxy_data"`
 	DatabaseURL string `env:"DATABASE_URL"`
-	SQLEcho     bool   `env:"SQL_ECHO" envDefault:"false"`
 
-	// Web/proxy fields keep former env tags solely for one-time upgrade import.
-	// SQLite is authoritative after app_metadata records that import.
+	// Identity and listener fields keep their env tags for install-time seeding
+	// and for the one-time upgrade import. SQLite is authoritative afterwards,
+	// and the web console is where they are changed.
 	WebHost             string `env:"WEB_HOST" envDefault:"0.0.0.0"`
 	WebPort             int    `env:"WEB_PORT" envDefault:"39527"`
-	AdminAuthEnabled    bool   `env:"ADMIN_AUTH_ENABLED" envDefault:"true"`
 	AdminUsername       string `env:"ADMIN_USERNAME"`
 	AdminPassword       string `env:"ADMIN_PASSWORD"`
 	AdminSecretPath     string `env:"ADMIN_SECRET_PATH"`
-	SessionTTLSeconds   int    `env:"SESSION_TTL_SECONDS" envDefault:"2592000"`
 	AllowProcessRestart bool   `env:"ALLOW_PROCESS_RESTART" envDefault:"true"`
 
-	ProxyHost               string  `env:"PROXY_HOST" envDefault:"0.0.0.0"`
-	ProxyPort               int     `env:"PROXY_PORT" envDefault:"9527"`
-	ProxyEnabled            bool    `env:"PROXY_ENABLED" envDefault:"true"`
-	ProxyUsername           string  `env:"PROXY_USERNAME"`
-	ProxyPassword           string  `env:"PROXY_PASSWORD"`
-	ProxyMaxConnections     int     `env:"PROXY_MAX_CONNECTIONS" envDefault:"256"`
-	ProxyConnectTimeoutSecs float64 `env:"PROXY_CONNECT_TIMEOUT_SECONDS" envDefault:"20"`
-	ProxyIdleTimeoutSecs    float64 `env:"PROXY_IDLE_TIMEOUT_SECONDS" envDefault:"120"`
-	ProxyDNSServer          string  `env:"PROXY_DNS_SERVER" envDefault:"8.8.8.8"`
-	DNSRepairEnabled        bool    `env:"DNS_REPAIR_ENABLED" envDefault:"false"`
-	DNSRepairServers        string  `env:"DNS_REPAIR_SERVERS" envDefault:"1.1.1.1,8.8.8.8"`
+	ProxyHost     string `env:"PROXY_HOST" envDefault:"0.0.0.0"`
+	ProxyPort     int    `env:"PROXY_PORT" envDefault:"9527"`
+	ProxyEnabled  bool   `env:"PROXY_ENABLED" envDefault:"true"`
+	ProxyUsername string `env:"PROXY_USERNAME"`
+	ProxyPassword string `env:"PROXY_PASSWORD"`
 
-	// Machine-level OpenVPN/TUN values intentionally remain environment-backed.
+	// Machine-level values intentionally remain environment-backed.
 	//
 	// TunnelInterface, ProbeDevicePrefix and PolicyRoutingTable all name things
-	// in namespaces shared with every other program on the host. Their defaults
-	// come from internal/naming rather than literals here, so the project has
-	// exactly one place that decides what it claims. Leave them unset to accept
-	// those defaults; set them to move out of a neighbour's way.
-	OpenVPNCommand            string  `env:"OPENVPN_COMMAND" envDefault:"openvpn"`
-	OpenVPNUsername           string  `env:"OPENVPN_USERNAME" envDefault:"vpn"`
-	OpenVPNPassword           string  `env:"OPENVPN_PASSWORD" envDefault:"vpn"`
-	OpenVPNTestTimeoutSecs    float64 `env:"OPENVPN_TEST_TIMEOUT_SECONDS" envDefault:"15"`
-	OpenVPNConnectTimeoutSecs float64 `env:"OPENVPN_CONNECT_TIMEOUT_SECONDS" envDefault:"35"`
-	TunnelInterface           string  `env:"TUNNEL_INTERFACE"`
-	ProbeDevicePrefix         string  `env:"PROBE_DEVICE_PREFIX"`
-	TestTunStart              int     `env:"TEST_TUN_START" envDefault:"1"`
-	TestTunEnd                int     `env:"TEST_TUN_END" envDefault:"64"`
-	MaxProbeConcurrency       int     `env:"MAX_PROBE_CONCURRENCY" envDefault:"5"`
-	PolicyRoutingTable        int     `env:"POLICY_ROUTING_TABLE"`
+	// in namespaces shared with every other program on the host, and
+	// OpenVPNCommand names a binary whose path is the host's business. Their
+	// defaults come from internal/naming rather than literals here, so the
+	// project has exactly one place that decides what it claims. Leave them
+	// unset to accept those defaults; set them to move out of a neighbour's way.
+	OpenVPNCommand    string `env:"OPENVPN_COMMAND" envDefault:"openvpn"`
+	TunnelInterface   string `env:"TUNNEL_INTERFACE"`
+	ProbeDevicePrefix string `env:"PROBE_DEVICE_PREFIX"`
 
-	// Discovery fields are legacy import inputs; SQLite overwrites them at run time.
-	VPNGateAPIURL      string  `env:"VPNGATE_API_URL" envDefault:"https://www.vpngate.net/api/iphone/"`
-	DiscoveryLimit     int     `env:"DISCOVERY_LIMIT" envDefault:"300"`
-	RequestTimeoutSecs float64 `env:"REQUEST_TIMEOUT_SECONDS" envDefault:"15"`
-	IPInfoAPIURL       string  `env:"IP_INFO_API_URL" envDefault:"http://ip-api.com/batch?lang=zh-CN&fields=status,message,query,country,regionName,city,isp,org,as,asname,proxy,hosting,mobile"`
-	IPInfoCacheSeconds int     `env:"IP_INFO_CACHE_SECONDS" envDefault:"604800"`
-
-	// Maintenance and network fields are also one-time legacy import inputs.
-	HealthCheckIntervalSecs  float64 `env:"HEALTH_CHECK_INTERVAL_SECONDS" envDefault:"30"`
-	ActivePingIntervalSecs   float64 `env:"ACTIVE_PING_INTERVAL_SECONDS" envDefault:"10"`
-	MaintenanceIntervalSecs  float64 `env:"MAINTENANCE_INTERVAL_SECONDS" envDefault:"10800"`
-	DisconnectedRetrySecs    float64 `env:"DISCONNECTED_RETRY_SECONDS" envDefault:"30"`
-	MaintenanceEnabled       bool    `env:"MAINTENANCE_ENABLED" envDefault:"true"`
-	InitialConnectTestLimit  int     `env:"INITIAL_CONNECT_TEST_LIMIT" envDefault:"10"`
-	ManualTestNodeLimit      int     `env:"MANUAL_TEST_NODE_LIMIT" envDefault:"5"`
-	InvalidBackoffSeconds    int     `env:"INVALID_BACKOFF_SECONDS" envDefault:"1800"`
-	RoutingSetupRetries      int     `env:"ROUTING_SETUP_RETRIES" envDefault:"3"`
-	RoutingRetryIntervalSecs float64 `env:"ROUTING_RETRY_INTERVAL_SECONDS" envDefault:"1"`
-	RoutingStrictRPFilter    bool    `env:"ROUTING_STRICT_RP_FILTER" envDefault:"false"`
-	StaleNodeGraceSeconds    int     `env:"STALE_NODE_GRACE_SECONDS" envDefault:"604800"`
+	// PolicyRoutingTable belongs to that same family. TestTunStart/TestTunEnd do
+	// not come from the environment — they start at the constants in tuning.go —
+	// but finalizeNaming may narrow the range to keep it clear of
+	// TunnelInterface, so they are fields rather than constants at the use site.
+	PolicyRoutingTable int `env:"POLICY_ROUTING_TABLE"`
+	TestTunStart       int
+	TestTunEnd         int
 }
 
 // Load parses the environment into a Config, applies derived defaults, and
@@ -160,6 +134,7 @@ func (c *Config) finalize() error {
 // default from internal/naming; anything set by the operator is validated here
 // so a bad value fails at startup instead of inside an OpenVPN log line.
 func (c *Config) finalizeNaming() error {
+	c.TestTunStart, c.TestTunEnd = ProbeDeviceRangeStart, ProbeDeviceRangeEnd
 	if c.ProbeDevicePrefix == "" {
 		c.ProbeDevicePrefix = naming.DevicePrefix
 	}
@@ -178,22 +153,15 @@ func (c *Config) finalizeNaming() error {
 	if err := naming.ValidateRoutingTable(c.PolicyRoutingTable); err != nil {
 		return fmt.Errorf("FREE_PROXY_POLICY_ROUTING_TABLE: %w", err)
 	}
-	if c.TestTunStart < 0 {
-		return errors.New("FREE_PROXY_TEST_TUN_START must not be negative")
-	}
-	if c.TestTunStart > c.TestTunEnd {
-		return errors.New("FREE_PROXY_TEST_TUN_START must not exceed FREE_PROXY_TEST_TUN_END")
-	}
 	// The active tunnel's device must never fall inside the probe pool, or a
-	// probe would be handed the name the live exit is already using.
+	// probe would be handed the name the live exit is already using. The range
+	// is ours, so it yields: an operator who moved TunnelInterface onto a probe
+	// index gets the pool narrowed rather than a startup failure.
 	if idx, ok := probeIndex(c.TunnelInterface, c.ProbeDevicePrefix); ok && idx >= c.TestTunStart && idx <= c.TestTunEnd {
-		if idx != c.TestTunStart {
-			return fmt.Errorf("FREE_PROXY_TUNNEL_INTERFACE %q falls inside the probe device range %d-%d; move it out or narrow the range",
-				c.TunnelInterface, c.TestTunStart, c.TestTunEnd)
-		}
 		c.TestTunStart = idx + 1
 		if c.TestTunStart > c.TestTunEnd {
-			return fmt.Errorf("FREE_PROXY_TEST_TUN_END must leave at least one probe device above %q", c.TunnelInterface)
+			return fmt.Errorf("FREE_PROXY_TUNNEL_INTERFACE %q leaves no probe device below %s%d",
+				c.TunnelInterface, c.ProbeDevicePrefix, ProbeDeviceRangeEnd)
 		}
 	}
 	return nil
@@ -223,37 +191,6 @@ func (c *Config) EnsureDirectories() error {
 
 func (c *Config) ConfigsDir() string { return filepath.Join(c.DataDir, "configs") }
 func (c *Config) LogsDir() string    { return filepath.Join(c.DataDir, "logs") }
-
-// ParsedDNSRepairServers returns the trimmed, non-empty DNS repair servers.
-func (c *Config) ParsedDNSRepairServers() []string {
-	out := make([]string, 0, 4)
-	for _, s := range strings.Split(c.DNSRepairServers, ",") {
-		if s = strings.TrimSpace(s); s != "" {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-// Duration accessors convert the numeric *_seconds fields to time.Duration.
-func (c *Config) SessionTTL() time.Duration          { return secs(float64(c.SessionTTLSeconds)) }
-func (c *Config) ProxyConnectTimeout() time.Duration { return secs(c.ProxyConnectTimeoutSecs) }
-func (c *Config) ProxyIdleTimeout() time.Duration    { return secs(c.ProxyIdleTimeoutSecs) }
-func (c *Config) OpenVPNTestTimeout() time.Duration  { return secs(c.OpenVPNTestTimeoutSecs) }
-func (c *Config) OpenVPNConnectTimeout() time.Duration {
-	return secs(c.OpenVPNConnectTimeoutSecs)
-}
-func (c *Config) RequestTimeout() time.Duration       { return secs(c.RequestTimeoutSecs) }
-func (c *Config) HealthCheckInterval() time.Duration  { return secs(c.HealthCheckIntervalSecs) }
-func (c *Config) ActivePingInterval() time.Duration   { return secs(c.ActivePingIntervalSecs) }
-func (c *Config) MaintenanceInterval() time.Duration  { return secs(c.MaintenanceIntervalSecs) }
-func (c *Config) DisconnectedRetry() time.Duration    { return secs(c.DisconnectedRetrySecs) }
-func (c *Config) RoutingRetryInterval() time.Duration { return secs(c.RoutingRetryIntervalSecs) }
-func (c *Config) IPInfoCacheTTL() time.Duration       { return secs(float64(c.IPInfoCacheSeconds)) }
-func (c *Config) InvalidBackoff() time.Duration       { return secs(float64(c.InvalidBackoffSeconds)) }
-func (c *Config) StaleNodeGrace() time.Duration       { return secs(float64(c.StaleNodeGraceSeconds)) }
-
-func secs(v float64) time.Duration { return time.Duration(v * float64(time.Second)) }
 
 func expandUser(p string) string {
 	if p == "~" || strings.HasPrefix(p, "~/") {

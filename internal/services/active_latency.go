@@ -11,7 +11,6 @@ import (
 
 // ActiveLatencyMonitor periodically refreshes the active node's latency.
 type ActiveLatencyMonitor struct {
-	cfg     *config.Config
 	nodes   *store.NodeRepository
 	gateway *GatewayService
 	runner  netx.CommandRunner
@@ -19,13 +18,13 @@ type ActiveLatencyMonitor struct {
 }
 
 // NewActiveLatencyMonitor constructs an ActiveLatencyMonitor.
-func NewActiveLatencyMonitor(cfg *config.Config, nodes *store.NodeRepository, gateway *GatewayService, runner netx.CommandRunner) *ActiveLatencyMonitor {
-	return &ActiveLatencyMonitor{cfg: cfg, nodes: nodes, gateway: gateway, runner: runner}
+func NewActiveLatencyMonitor(nodes *store.NodeRepository, gateway *GatewayService, runner netx.CommandRunner) *ActiveLatencyMonitor {
+	return &ActiveLatencyMonitor{nodes: nodes, gateway: gateway, runner: runner}
 }
 
 // Run loops until ctx is cancelled.
 func (m *ActiveLatencyMonitor) Run(ctx context.Context) {
-	t := time.NewTicker(m.cfg.ActivePingInterval())
+	t := time.NewTicker(config.ActivePingInterval)
 	defer t.Stop()
 	for {
 		select {

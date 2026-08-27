@@ -72,7 +72,7 @@ func (m *Manager) Probe(ctx context.Context, configText, device string) domain.T
 	})
 	res, _ := m.runner.Start(ctx, StartParams{
 		Bin: args[0], Args: args[1:], ConfigPath: configPath, Device: device,
-		StartupTimeout: m.cfg.OpenVPNTestTimeout(), KeepAlive: false,
+		StartupTimeout: config.OpenVPNTestTimeout, KeepAlive: false,
 	})
 	return res
 }
@@ -99,7 +99,7 @@ func (m *Manager) Connect(ctx context.Context, nodeID, configText string) domain
 	})
 	res, managed := m.runner.Start(ctx, StartParams{
 		Bin: args[0], Args: args[1:], ConfigPath: configPath, Device: m.cfg.TunnelInterface,
-		StartupTimeout: m.cfg.OpenVPNConnectTimeout(), KeepAlive: true,
+		StartupTimeout: config.OpenVPNConnectTimeout, KeepAlive: true,
 	})
 	if res.Success && managed != nil {
 		managed.SetExitHandler(m.exitHandler)
@@ -226,7 +226,7 @@ func (m *Manager) ensureAuthFile() error {
 	if err := m.cfg.EnsureDirectories(); err != nil {
 		return err
 	}
-	data := m.cfg.OpenVPNUsername + "\n" + m.cfg.OpenVPNPassword + "\n"
+	data := config.OpenVPNUsername + "\n" + config.OpenVPNPassword + "\n"
 	return os.WriteFile(m.authFile, []byte(data), 0o600)
 }
 

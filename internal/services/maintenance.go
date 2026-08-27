@@ -14,7 +14,6 @@ import (
 
 // MaintenanceService runs the periodic discover→probe→(auto-connect) cycle.
 type MaintenanceService struct {
-	cfg          *config.Config
 	nodes        *store.NodeRepository
 	settingsRepo *store.SettingsRepository
 	probes       *store.ProbeResultRepository
@@ -29,12 +28,12 @@ type MaintenanceService struct {
 }
 
 // NewMaintenanceService constructs a MaintenanceService.
-func NewMaintenanceService(cfg *config.Config, nodes *store.NodeRepository, settingsRepo *store.SettingsRepository,
+func NewMaintenanceService(nodes *store.NodeRepository, settingsRepo *store.SettingsRepository,
 	probes *store.ProbeResultRepository, jobs *store.JobRepository,
 	discovery *DiscoveryService, probe *ProbeService, pool *ProxyPoolService, gateway *GatewayService,
 	autoSwitch *AutoSwitchService, coordinator *Coordinator) *MaintenanceService {
 	return &MaintenanceService{
-		cfg: cfg, nodes: nodes, settingsRepo: settingsRepo, probes: probes, jobs: jobs,
+		nodes: nodes, settingsRepo: settingsRepo, probes: probes, jobs: jobs,
 		discovery: discovery, probe: probe,
 		pool: pool, gateway: gateway, autoSwitch: autoSwitch, coordinator: coordinator,
 	}
@@ -79,7 +78,7 @@ func (m *MaintenanceService) run(ctx context.Context) (domain.MaintenanceResult,
 		slog.Warn("node discovery failed; probing the stored pool and skipping the stale purge",
 			"module", "maintenance", "err", err)
 	} else {
-		_, _ = m.nodes.PurgeStaleNodes(ctx, m.cfg.StaleNodeGrace())
+		_, _ = m.nodes.PurgeStaleNodes(ctx, config.StaleNodeGrace)
 	}
 
 	settings, err := m.settingsRepo.Get(ctx)
@@ -100,7 +99,7 @@ func (m *MaintenanceService) run(ctx context.Context) (domain.MaintenanceResult,
 		} else {
 			sort.SliceStable(candidates, func(i, j int) bool { return probeLess(candidates[i], candidates[j], settings) })
 		}
-		limit := m.cfg.InitialConnectTestLimit
+		limit := config.InitialConnectTestLimit
 		if limit > len(candidates) {
 			limit = len(candidates)
 		}
@@ -277,15 +276,14 @@ func probeLess(a, b domain.ProxyNodeRead, settings domain.ProxySettings) bool {
 
 // MaintenanceMonitor runs maintenance on an interval, backing off when disconnected.
 type MaintenanceMonitor struct {
-	cfg         *config.Config
 	maintenance *MaintenanceService
 	gateway     *GatewayService
 	State       MonitorState
 }
 
 // NewMaintenanceMonitor constructs a MaintenanceMonitor.
-func NewMaintenanceMonitor(cfg *config.Config, maintenance *MaintenanceService, gateway *GatewayService) *MaintenanceMonitor {
-	return &MaintenanceMonitor{cfg: cfg, maintenance: maintenance, gateway: gateway}
+func NewMaintenanceMonitor(maintenance *MaintenanceService, gateway *GatewayService) *MaintenanceMonitor {
+	return &MaintenanceMonitor{maintenance: maintenance, gateway: gateway}
 }
 
 // Run loops until ctx is cancelled.
@@ -299,9 +297,9 @@ func (m *MaintenanceMonitor) Run(ctx context.Context) {
 			success = true
 			m.State.Heartbeat(true, "")
 		}
-		delay := m.cfg.MaintenanceInterval()
+		delay := config.MaintenanceInterval
 		if !success && m.gateway.Status().ActiveNodeID == nil {
-			delay = m.cfg.DisconnectedRetry()
+			delay = config.DisconnectedRetry
 		}
 		select {
 		case <-ctx.Done():

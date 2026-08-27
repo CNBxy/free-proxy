@@ -34,7 +34,6 @@ const (
 // AutoSwitchService picks a replacement exit after a failure, blacklisting nodes
 // that fail to activate.
 type AutoSwitchService struct {
-	cfg          *config.Config
 	nodes        *store.NodeRepository
 	settingsRepo *store.SettingsRepository
 	pool         *ProxyPoolService
@@ -46,8 +45,8 @@ type AutoSwitchService struct {
 }
 
 // NewAutoSwitchService constructs an AutoSwitchService.
-func NewAutoSwitchService(cfg *config.Config, nodes *store.NodeRepository, settingsRepo *store.SettingsRepository, pool *ProxyPoolService, gateway *GatewayService) *AutoSwitchService {
-	return &AutoSwitchService{cfg: cfg, nodes: nodes, settingsRepo: settingsRepo, pool: pool, gateway: gateway}
+func NewAutoSwitchService(nodes *store.NodeRepository, settingsRepo *store.SettingsRepository, pool *ProxyPoolService, gateway *GatewayService) *AutoSwitchService {
+	return &AutoSwitchService{nodes: nodes, settingsRepo: settingsRepo, pool: pool, gateway: gateway}
 }
 
 // Switch activates the best alternate node, or the fixed node in fixed mode.
@@ -117,7 +116,7 @@ func (s *AutoSwitchService) switchExcluding(ctx context.Context, skip map[string
 		if res.Message != "" {
 			msg = res.Message
 		}
-		_ = s.nodes.Blacklist(ctx, candidate.ID, msg, s.cfg.InvalidBackoff())
+		_ = s.nodes.Blacklist(ctx, candidate.ID, msg, config.InvalidBackoff)
 	}
 	return nil, nil
 }
@@ -139,7 +138,7 @@ func (s *AutoSwitchService) HandleUnexpectedExit(ctx context.Context, nodeID str
 
 	if nodeID != "" && uptime > 0 && uptime < minStableUptime {
 		msg := fmt.Sprintf("tunnel dropped %s after connecting", uptime.Round(time.Second))
-		_ = s.nodes.Blacklist(ctx, nodeID, msg, s.cfg.InvalidBackoff())
+		_ = s.nodes.Blacklist(ctx, nodeID, msg, config.InvalidBackoff)
 		slog.Warn("exit node dropped its tunnel too quickly; entering cooldown",
 			"module", "autoswitch", "node", nodeID, "uptime", uptime.Round(time.Second))
 	}

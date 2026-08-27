@@ -226,24 +226,19 @@ chmod +x free-proxy && sudo ./free-proxy install
 
 ### 配置
 
-生产环境配置文件默认 `/etc/free-proxy/free-proxy.env`(由 `free-proxy install` 生成),只保留启动和机器相关配置。后台凭据、代理服务、节点发现、检测维护、DNS 与路由参数统一在网页后台管理并写入 SQLite。升级时旧环境变量和 `web-config.json` 会一次性迁移到数据库,随后移除旧文件和已迁移的环境项。
+生产环境配置文件默认 `/etc/free-proxy/free-proxy.env`(由 `free-proxy install` 生成),只保留数据目录和本机需要避让的网络命名(网卡名、探测网卡前缀、策略路由表号)。后台凭据、代理服务和端口在网页后台管理并写入 SQLite;检测维护、节点发现、DNS 与路由等调优参数则是程序内的常量,不在任何一处配置。升级时旧环境变量和 `web-config.json` 会一次性迁移到数据库,随后移除旧文件和已迁移的环境项。
 
 ```text
 FREE_PROXY_DATA_DIR=/var/lib/free-proxy
 FREE_PROXY_DATABASE_URL=
-FREE_PROXY_SQL_ECHO=false
 FREE_PROXY_ALLOW_PROCESS_RESTART=true
 FREE_PROXY_OPENVPN_COMMAND=openvpn
-FREE_PROXY_OPENVPN_USERNAME=vpn
-FREE_PROXY_OPENVPN_PASSWORD=vpn
 FREE_PROXY_TUNNEL_INTERFACE=fpx0
 FREE_PROXY_PROBE_DEVICE_PREFIX=fpx
-FREE_PROXY_TEST_TUN_START=1
-FREE_PROXY_TEST_TUN_END=64
 FREE_PROXY_POLICY_ROUTING_TABLE=9527
 ```
 
-> 网页默认端口 `39527`,代理默认端口 `9527`,监听固定绑定 `0.0.0.0`;端口、凭据和外网访问均在后台配置。外网访问开关即时生效,其余运行参数保存后服务自动重启。
+> 后台只配置十项:后台用户名、密码、管理路径、网页端口、网页外网访问;代理用户名、密码、端口、启用开关、代理外网访问。检测间隔、超时、并发、数据源等参数已固定为程序内常量。网页默认端口 `39527`,代理默认端口 `9527`,监听固定绑定 `0.0.0.0`;外网访问开关即时生效,其余保存后服务自动重启。
 
 ### 与 3x-ui 等其它面板共存
 
@@ -267,7 +262,7 @@ FREE_PROXY_POLICY_ROUTING_TABLE=9527
 
 > 网页端口 `39527` 与代理端口 `9527` 同样是共享资源。它们不与 3x-ui 的默认端口冲突,如遇占用可在后台修改。
 
-弱配置小鸡(如 1 核 / 1G)可在后台调低「探测并发数」「每次发现节点上限」「首次连接检测数」。
+探测并发、发现上限、检测间隔和各类超时不再是配置项,已作为常量固定在程序里,取值本身就按 1 核 / 1G 小鸡选定。
 
 ### API 摘要
 

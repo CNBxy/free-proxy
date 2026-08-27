@@ -36,8 +36,8 @@ func TestMigrateLegacyNamingRewritesShippedDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if len(changed) != 5 {
-		t.Errorf("expected 5 changes (4 rewrites + the new prefix), got %v", changed)
+	if len(changed) != 3 {
+		t.Errorf("expected 3 changes (2 rewrites + the new prefix), got %v", changed)
 	}
 
 	data, err := os.ReadFile(path)
@@ -158,16 +158,18 @@ func TestUpgradeFromLegacyEnvFile(t *testing.T) {
 		"FREE_PROXY_TUNNEL_INTERFACE=" + naming.ActiveDevice(),
 		"FREE_PROXY_PROBE_DEVICE_PREFIX=" + naming.DevicePrefix,
 		"FREE_PROXY_POLICY_ROUTING_TABLE=9527",
-		"FREE_PROXY_TEST_TUN_START=1",
-		"FREE_PROXY_TEST_TUN_END=64",
 		"FREE_PROXY_DATA_DIR=/var/lib/free-proxy",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("upgraded env lost %q:\n%s", want, got)
 		}
 	}
-	// Database-backed settings are still pruned, as before.
-	for _, gone := range []string{"FREE_PROXY_WEB_PORT", "FREE_PROXY_DISCOVERY_LIMIT"} {
+	// Everything the console or a constant now owns is pruned, including the
+	// probe device range this file used to carry.
+	for _, gone := range []string{
+		"FREE_PROXY_WEB_PORT", "FREE_PROXY_DISCOVERY_LIMIT",
+		"FREE_PROXY_TEST_TUN_START", "FREE_PROXY_TEST_TUN_END",
+	} {
 		if strings.Contains(got, gone) {
 			t.Errorf("%s should have been pruned:\n%s", gone, got)
 		}
