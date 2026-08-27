@@ -52,20 +52,17 @@ func buildDeps(ctx context.Context, cfg *config.Config, repos *store.Repos, auth
 	healthUsername := security.RandomCredential(32)
 	healthPassword := security.RandomCredential(32)
 	connector := proxy.NewSocketConnector(cfg.TunnelInterface, cfg.ProxyDNSServer, cfg.ProxyConnectTimeout())
+	// Both of these run on every accepted proxy connection, so neither may go to
+	// the database or to scrypt unconditionally — see ProxyAuthenticator.
+	proxyAuth := security.NewProxyAuthenticator(repos.App)
 	proxyGateway := proxy.New(proxy.Options{
 		Host: "0.0.0.0", Port: adminCfg.ProxyPort,
 		MaxConnections: cfg.ProxyMaxConnections,
 		ConnectTimeout: cfg.ProxyConnectTimeout(), IdleTimeout: cfg.ProxyIdleTimeout(),
-		AuthRequired: func() bool {
-			s, err := repos.App.Get(context.Background())
-			// Fail closed on a database read error. The internal health credential
-			// remains usable so monitoring does not trigger a false recovery.
-			return err != nil || s.Proxy.Username != "" && s.Proxy.PasswordHash != ""
-		},
-		Authenticate: func(username, password string) bool {
-			s, err := repos.App.Get(context.Background())
-			return err == nil && username == s.Proxy.Username && security.VerifyPassword(password, s.Proxy.PasswordHash)
-		},
+		// Fails closed on a database read error. The internal health credential
+		// remains usable so monitoring does not trigger a false recovery.
+		AuthRequired: proxyAuth.Required,
+		Authenticate: proxyAuth.Authenticate,
 		InternalAuthenticate: func(username, password string) bool {
 			healthUserOK := subtle.ConstantTimeCompare([]byte(username), []byte(healthUsername))
 			healthPasswordOK := subtle.ConstantTimeCompare([]byte(password), []byte(healthPassword))

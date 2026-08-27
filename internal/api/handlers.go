@@ -29,9 +29,17 @@ func (h *Handlers) Login(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
+	// Throttle before verifying, not after: verification is the expensive part
+	// (an scrypt derivation, ~16 MiB and tens of milliseconds), and this endpoint
+	// is reachable without a session.
+	client := c.RealIP()
+	if !h.Deps.Auth.Logins.Allow(client) {
+		return echo.NewHTTPError(http.StatusTooManyRequests, "Too many login attempts; try again in a minute")
+	}
 	if !h.Deps.Auth.Verify(req.Username, req.Password) {
 		return echo.NewHTTPError(http.StatusForbidden, "Incorrect username or password")
 	}
+	h.Deps.Auth.Logins.Reset(client)
 	token, err := h.Deps.Auth.Sessions.Create()
 	if err != nil {
 		return err

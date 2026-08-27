@@ -55,6 +55,35 @@ func TestHashVerifyRoundTrip(t *testing.T) {
 	}
 }
 
+// The cost parameters are read back out of the stored hash, so a corrupt or
+// tampered row gets to choose how much memory a login allocates. Every case
+// here passes scrypt's own validation — it only rejects r*p >= 1<<30 — and
+// would be served if VerifyPassword did not bound the sizes itself.
+func TestVerifyRejectsOversizedCostParameters(t *testing.T) {
+	// salt and digest are well-formed so the parameters are the only thing
+	// standing between the call and the allocation.
+	const tail = "$c2FsdHNhbHQ=$ZGlnZXN0ZGlnZXN0"
+	cases := map[string]string{
+		"N sizes the mixing buffer": "scrypt$67108864$8$1" + tail,      // 128*8*2^26 = 64 GiB
+		"p sizes the block buffer":  "scrypt$16384$1$536870911" + tail, // 128*1*p  = 64 GiB
+		"r multiplies both":         "scrypt$16384$65536$1" + tail,     // 128*65536*16384
+	}
+	for name, hash := range cases {
+		if VerifyPassword("anything", hash) {
+			t.Errorf("%s: verified instead of being rejected", name)
+		}
+	}
+
+	// The shipped parameters must still be accepted, or the bound is too tight.
+	live, err := HashPassword("Sup3rSecret!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !VerifyPassword("Sup3rSecret!", live) {
+		t.Fatal("the parameters this package writes were rejected by its own bound")
+	}
+}
+
 func TestRandomCredential(t *testing.T) {
 	for range 50 {
 		c := RandomCredential(12)

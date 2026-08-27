@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,13 +24,49 @@ import (
 	"golang.org/x/crypto/scrypt"
 )
 
+// maxScryptMemory bounds the working set a single derivation may ask for.
+// scrypt sizes that set as 128*r*N bytes — 16 MiB at the parameters below — and
+// the parameters are read back out of the stored hash. They are ours to begin
+// with, but a corrupt row should not be able to turn a login into an OOM.
+const maxScryptMemory = 64 << 20
+
+// scryptGate bounds how many derivations run at once.
+//
+// Every caller here is driven by something external: a proxy client opening a
+// connection, a browser posting the login form. Without a bound the peak is set
+// by whoever is knocking rather than by what the host has, and each derivation
+// in flight holds 16 MiB. The proxy gateway alone admits PROXY_MAX_CONNECTIONS
+// clients concurrently — 256 by default, or 4 GiB of scratch memory and every
+// core pinned, from one browser opening one page.
+var scryptGate = make(chan struct{}, scryptConcurrency())
+
+func scryptConcurrency() int {
+	n := runtime.NumCPU()
+	if n > 4 {
+		n = 4
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// deriveScrypt runs scrypt.Key while holding a slot in scryptGate. Callers queue
+// rather than fail: waiting costs a parked goroutine, admitting them all costs
+// 16 MiB each.
+func deriveScrypt(pw, salt []byte, n, r, p, keyLen int) ([]byte, error) {
+	scryptGate <- struct{}{}
+	defer func() { <-scryptGate }()
+	return scrypt.Key(pw, salt, n, r, p, keyLen)
+}
+
 // HashPassword returns a scrypt hash in the format scrypt$16384$8$1$salt$digest.
 func HashPassword(pw string) (string, error) {
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	dk, err := scrypt.Key([]byte(pw), salt, 1<<14, 8, 1, 32)
+	dk, err := deriveScrypt([]byte(pw), salt, 1<<14, 8, 1, 32)
 	if err != nil {
 		return "", err
 	}
@@ -50,6 +87,13 @@ func VerifyPassword(pw, encoded string) bool {
 	if err1 != nil || err2 != nil || err3 != nil {
 		return false
 	}
+	// scrypt makes two large allocations: 128*r*N for the mixing buffer and
+	// 128*r*p for the blocks. Its own guard only rejects r*p >= 1<<30, which
+	// still admits a p asking for tens of gigabytes, so bound both.
+	if n <= 0 || r <= 0 || pp <= 0 ||
+		128*int64(r)*int64(n) > maxScryptMemory || 128*int64(r)*int64(pp) > maxScryptMemory {
+		return false
+	}
 	salt, err := base64.URLEncoding.DecodeString(p[4])
 	if err != nil {
 		return false
@@ -58,7 +102,7 @@ func VerifyPassword(pw, encoded string) bool {
 	if err != nil {
 		return false
 	}
-	got, err := scrypt.Key([]byte(pw), salt, n, r, pp, len(want))
+	got, err := deriveScrypt([]byte(pw), salt, n, r, pp, len(want))
 	if err != nil {
 		return false
 	}
@@ -340,11 +384,26 @@ func (m *SessionManager) Create() (string, error) {
 		return "", err
 	}
 	token := fmt.Sprintf("%x", b)
+	now := time.Now()
 	m.mu.Lock()
-	m.sessions[token] = time.Now().Add(m.ttl)
+	// Expired tokens are otherwise only dropped when someone presents them, and
+	// nobody presents a token they have stopped using. With a 30-day TTL that
+	// left every session ever issued in the map for the life of the process.
+	if len(m.sessions) >= sessionSweepThreshold {
+		for t, exp := range m.sessions {
+			if now.After(exp) {
+				delete(m.sessions, t)
+			}
+		}
+	}
+	m.sessions[token] = now.Add(m.ttl)
 	m.mu.Unlock()
 	return token, nil
 }
+
+// sessionSweepThreshold is the size at which Create pays for a sweep of expired
+// tokens. Below it the map is small enough not to be worth walking.
+const sessionSweepThreshold = 256
 
 // Valid reports whether a token is present and unexpired.
 func (m *SessionManager) Valid(token string) bool {
@@ -383,11 +442,14 @@ type AuthService struct {
 	Cfg      *config.Config
 	Store    *AdminConfigStore
 	Sessions *SessionManager
+	// Logins throttles password verification per client. Verify is an scrypt
+	// derivation behind an endpoint that takes unauthenticated requests.
+	Logins *AttemptLimiter
 }
 
 // NewAuthService constructs an AuthService.
 func NewAuthService(cfg *config.Config, store *AdminConfigStore, sessions *SessionManager) *AuthService {
-	return &AuthService{Cfg: cfg, Store: store, Sessions: sessions}
+	return &AuthService{Cfg: cfg, Store: store, Sessions: sessions, Logins: NewLoginLimiter()}
 }
 
 // Verify checks a username/password against the stored config.
