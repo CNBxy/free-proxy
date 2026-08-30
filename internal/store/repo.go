@@ -363,6 +363,10 @@ func (r *NodeRepository) Delete(ctx context.Context, id string) error {
 // Statistics counts the whole pool. Every retained row is a node the liveness
 // sweep has not disproved, so there is no longer a subset to exclude: what the
 // dashboard counts and what the list shows are the same rows.
+//
+// Total and the per-status counts cover every row; the breakdowns the dashboard
+// shows next to them (ip type, country) are restricted to ready nodes, so a
+// tile that reads "residential" means residential *and usable right now*.
 func (r *NodeRepository) Statistics(ctx context.Context) (domain.PoolStatistics, error) {
 	var s domain.PoolStatistics
 	row := r.db.QueryRowContext(ctx, `SELECT
@@ -371,11 +375,11 @@ func (r *NodeRepository) Statistics(ctx context.Context) (domain.PoolStatistics,
 		SUM(CASE WHEN status='discovered' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN status='unavailable' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN status='cooldown' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN ip_type='residential' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN ip_type='mobile' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN ip_type='hosting' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN ip_type='unknown' THEN 1 ELSE 0 END),
-		COUNT(DISTINCT CASE WHEN country != '' THEN country END)
+		SUM(CASE WHEN status='ready' AND ip_type='residential' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN status='ready' AND ip_type='mobile' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN status='ready' AND ip_type='hosting' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN status='ready' AND ip_type='unknown' THEN 1 ELSE 0 END),
+		COUNT(DISTINCT CASE WHEN status='ready' AND country != '' THEN country END)
 		FROM proxy_nodes`)
 	var ready, disc, unavail, cool, res, mob, host, unk, countries sql.NullInt64
 	var total int64

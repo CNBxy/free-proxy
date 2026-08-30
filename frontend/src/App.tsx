@@ -76,9 +76,9 @@ export function App({ onLogout }: { onLogout: () => void }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
         <StatTile label="当前节点" value={stats?.total ?? "—"} />
         <StatTile label="当前可用" value={stats?.ready ?? "—"} />
-        <StatTile label="当前住宅" value={stats?.residential ?? "—"} />
-        <StatTile label="当前移动" value={stats?.mobile ?? "—"} />
-        <StatTile label="当前国家/地区" value={stats?.countries ?? "—"} />
+        <StatTile label="可用住宅" value={stats?.residential ?? "—"} />
+        <StatTile label="可用移动" value={stats?.mobile ?? "—"} />
+        <StatTile label="可用国家/地区" value={stats?.countries ?? "—"} />
         <StatTile label="黑名单" value={stats?.blacklisted ?? "—"} />
       </div>
 
