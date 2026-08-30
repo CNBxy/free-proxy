@@ -4,7 +4,9 @@
 
 > Run **a single command** on an overseas VPS and it automatically pulls hundreds of free exit nodes from public sources (VPNGate), runs real speed tests, intelligently picks the fastest routes, and exposes a stable **SOCKS5 / HTTP proxy**. When a node drops, it switches automatically — no babysitting required.
 
-> 🎥 Demo video: [YouTube](https://youtu.be/0uf9St0cBM8)
+🎥 [Free Residential IP Proxy Setup Tutorial | Deploy a SOCKS5 / HTTP Proxy on a VPS With One Command | FreeProxy](https://youtu.be/0uf9St0cBM8)
+
+🎥 [Get 100+ Residential IPs for Free! Free-Proxy Update + Hands-On v2rayN Upstream Proxy Tutorial](https://youtu.be/eTeM7bPE60Q)
 
 <p>
   <img alt="One-command deploy" src="https://img.shields.io/badge/Deploy-One%20Command-brightgreen">

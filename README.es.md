@@ -4,7 +4,9 @@
 
 > Ejecuta **un solo comando** en un pequeño VPS en el extranjero y automáticamente obtiene cientos de salidas gratuitas desde fuentes públicas de nodos (VPNGate), mide su velocidad de forma real, elige de manera inteligente la ruta más rápida y ofrece hacia el exterior un **proxy SOCKS5 / HTTP** estable. Si un nodo se cae, cambia solo, sin que tengas que estar pendiente.
 
-> 🎥 Video de demostración: [YouTube](https://youtu.be/0uf9St0cBM8)
+🎥 [Tutorial para configurar un proxy gratuito con IP residencial | Despliega un proxy SOCKS5 / HTTP en un VPS con un solo comando | FreeProxy](https://youtu.be/0uf9St0cBM8)
+
+🎥 [¡Consigue fácilmente más de 100 IP residenciales gratis! Actualización de Free-Proxy + tutorial práctico de proxy ascendente en v2rayN](https://youtu.be/eTeM7bPE60Q)
 
 <p>
   <img alt="Despliegue con un comando" src="https://img.shields.io/badge/Despliegue-un%20comando-brightgreen">

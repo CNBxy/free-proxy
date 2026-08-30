@@ -4,7 +4,9 @@
 
 > 海外の格安 VPS 上で **1 行のコマンド** を実行するだけで、公開ノードソース(VPNGate)から数百の無料出口ノードを自動収集し、実際に速度を測定して最速の回線をスマートに選び、安定した **SOCKS5 / HTTP プロキシ** を提供します。ノードが切断されても自動で切り替わり、常に監視する必要はありません。
 
-> 🎥 デモ動画: [YouTube](https://youtu.be/0uf9St0cBM8)
+🎥 [無料の住宅 IP プロキシ構築チュートリアル｜VPS にワンコマンドで SOCKS5 / HTTP プロキシをデプロイ | FreeProxy](https://youtu.be/0uf9St0cBM8)
+
+🎥 [住宅 IP を 100 個以上無料で手軽に利用！Free-Proxy アップデート + v2rayN 前段プロキシ実践チュートリアル](https://youtu.be/eTeM7bPE60Q)
 
 <p>
   <img alt="ワンコマンドデプロイ" src="https://img.shields.io/badge/%E3%83%87%E3%83%97%E3%83%AD%E3%82%A4-1%E8%A1%8C%E3%83%9E%E3%83%B3%E3%83%89-brightgreen">

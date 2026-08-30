@@ -4,7 +4,9 @@
 
 > Esegui **un solo comando** su un piccolo VPS all'estero: recupererà automaticamente centinaia di uscite gratuite da fonti pubbliche di nodi (VPNGate), con test di velocità reali e selezione intelligente della linea più veloce, offrendo verso l'esterno un **proxy SOCKS5 / HTTP** stabile. Quando un nodo cade, passa automaticamente a un altro, senza che tu debba mai stare a controllare.
 
-> 🎥 Video dimostrativo: [YouTube](https://youtu.be/0uf9St0cBM8)
+🎥 [Tutorial per creare un proxy gratuito con IP residenziale | Distribuisci un proxy SOCKS5 / HTTP su VPS con un solo comando | FreeProxy](https://youtu.be/0uf9St0cBM8)
+
+🎥 [Più di 100 IP residenziali gratis in modo semplice! Aggiornamento di Free-Proxy + guida pratica al proxy upstream di v2rayN](https://youtu.be/eTeM7bPE60Q)
 
 <p>
   <img alt="Distribuzione con un comando" src="https://img.shields.io/badge/Distribuzione-un%20comando-brightgreen">
