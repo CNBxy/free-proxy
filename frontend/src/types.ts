@@ -28,6 +28,8 @@ export interface ProxyNode {
   provider: string;
   country: string;
   country_code: string;
+  country_zh: string;
+  country_flag: string;
   host_name: string;
   ip_address: string;
   remote_host: string;
@@ -48,6 +50,15 @@ export interface ProxyNode {
   source_present: boolean;
   last_probed_at: string | null;
   last_success_at: string | null;
+}
+
+export interface CountryFacet {
+  code: string;
+  country: string;
+  country_zh: string;
+  country_flag: string;
+  total: number;
+  ready: number;
 }
 
 export interface ProxyNodePage {

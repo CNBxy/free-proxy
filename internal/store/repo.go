@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/masteralanlab/free-proxy/internal/domain"
 	"github.com/masteralanlab/free-proxy/internal/store/gen"
@@ -101,6 +102,8 @@ func nodeToRead(n gen.ProxyNode) domain.ProxyNodeRead {
 		ProviderIdentity:    n.ProviderIdentity,
 		Country:             n.Country,
 		CountryCode:         n.CountryCode,
+		CountryZH:           domain.CountryChinese(n.CountryCode, n.Country),
+		CountryFlag:         domain.CountryFlag(n.CountryCode),
 		HostName:            n.HostName,
 		IPAddress:           n.IpAddress,
 		RemoteHost:          n.RemoteHost,
@@ -176,6 +179,89 @@ type NodeFilter struct {
 	ReachableOnly bool
 }
 
+// searchColumns are the columns the console's one search box covers. Country
+// and location arrive from the enrichment API in Chinese, so a Chinese city or
+// ISP name matches here directly; an English country label is reached through
+// the code list searchClause adds.
+var searchColumns = []string{
+	"ip_address", "remote_host", "host_name", "provider_identity",
+	"country", "country_code", "location", "owner", "as_name", "asn",
+}
+
+// Bounds on a search term. A query is typed by hand, so these only keep a
+// pathological paste from building an enormous statement. The length is in
+// runes: cutting a Chinese term mid-character would leave a pattern that
+// matches nothing.
+const (
+	maxSearchTerms     = 6
+	maxSearchTermRunes = 64
+)
+
+// isSearchSeparator ends a term. Whitespace is the obvious one, but a Chinese
+// IME makes "日本，东京" as easy to type as "日本 东京" and it means the same
+// thing here, so the punctuation that separates a list in Chinese counts too.
+func isSearchSeparator(r rune) bool {
+	if unicode.IsSpace(r) {
+		return true
+	}
+	switch r {
+	case ',', ';', '|', '，', '、', '；', '｜':
+		return true
+	}
+	return false
+}
+
+// searchTerms splits a query into terms. They are ANDed, so "日本 住宅" narrows
+// rather than widens — the behaviour anyone who has used a search box expects,
+// and the reason a two-word query used to return nothing.
+func searchTerms(search string) []string {
+	fields := strings.FieldsFunc(search, isSearchSeparator)
+	if len(fields) > maxSearchTerms {
+		fields = fields[:maxSearchTerms]
+	}
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if runes := []rune(f); len(runes) > maxSearchTermRunes {
+			f = string(runes[:maxSearchTermRunes])
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// searchClause matches one term against every searchable column, the id by
+// prefix, and the codes of any country the term names.
+func searchClause(term string) (string, []any) {
+	like := "%" + escapeLike(term) + "%"
+	parts := make([]string, 0, len(searchColumns)+2)
+	args := make([]any, 0, len(searchColumns)+2)
+	for _, col := range searchColumns {
+		parts = append(parts, col+` LIKE ? ESCAPE '\'`)
+		args = append(args, like)
+	}
+	// The id is a country prefix plus a hex digest, so a substring match on it
+	// would answer "beef" or "added" with unrelated nodes. A prefix match still
+	// finds the node whose id was copied out of the fixed-node setting.
+	parts = append(parts, `id LIKE ? ESCAPE '\'`)
+	args = append(args, escapeLike(term)+"%")
+	if codes := domain.MatchCountryCodes(term); len(codes) > 0 {
+		holders := make([]string, len(codes))
+		for i, code := range codes {
+			holders[i] = "?"
+			args = append(args, code)
+		}
+		parts = append(parts, "country_code IN ("+strings.Join(holders, ",")+")")
+	}
+	return "(" + strings.Join(parts, " OR ") + ")", args
+}
+
+// escapeLike neutralizes the wildcards LIKE would otherwise read out of the
+// user's text: a search for "10.0.0.1_" should look for that literal string.
+func escapeLike(term string) string {
+	r := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
+	return r.Replace(term)
+}
+
 func (f NodeFilter) where() (string, []any) {
 	var clauses []string
 	var args []any
@@ -188,14 +274,18 @@ func (f NodeFilter) where() (string, []any) {
 		args = append(args, f.Status)
 	}
 	if f.Country != "" {
-		clauses = append(clauses, "(country = ? OR country_code = ?)")
-		args = append(args, f.Country, f.Country)
+		if code := domain.CountryCode(f.Country); code != "" {
+			clauses = append(clauses, "(country_code = ? OR country = ?)")
+			args = append(args, code, f.Country)
+		} else {
+			clauses = append(clauses, "(country = ? OR country_code = ?)")
+			args = append(args, f.Country, f.Country)
+		}
 	}
-	if f.Search != "" {
-		like := "%" + f.Search + "%"
-		clauses = append(clauses,
-			"(ip_address LIKE ? OR host_name LIKE ? OR country LIKE ? OR remote_host LIKE ? OR provider_identity LIKE ?)")
-		args = append(args, like, like, like, like, like)
+	for _, term := range searchTerms(f.Search) {
+		clause, termArgs := searchClause(term)
+		clauses = append(clauses, clause)
+		args = append(args, termArgs...)
 	}
 	if f.FavoriteOnly {
 		clauses = append(clauses, "EXISTS (SELECT 1 FROM favorites WHERE favorites.node_id = proxy_nodes.id)")
@@ -240,6 +330,41 @@ func (r *NodeRepository) CountNodes(ctx context.Context, f NodeFilter) (int64, e
 	var total int64
 	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM proxy_nodes"+where, args...).Scan(&total)
 	return total, err
+}
+
+// CountryCounts groups the pool by country for the console's country picker.
+// The filter's Country and Search are dropped on purpose: the picker has to go
+// on offering every country the *other* filters allow, including the one
+// already picked, or choosing one would empty the list it was chosen from.
+func (r *NodeRepository) CountryCounts(ctx context.Context, f NodeFilter) ([]domain.CountryCount, error) {
+	f.Country, f.Search = "", ""
+	where, args := f.where()
+	query := `SELECT country_code, MIN(country), COUNT(*),
+		SUM(CASE WHEN status='ready' THEN 1 ELSE 0 END)
+		FROM proxy_nodes` + where + `
+		GROUP BY country_code ORDER BY COUNT(*) DESC, country_code ASC`
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []domain.CountryCount{}
+	for rows.Next() {
+		var code, country sql.NullString
+		var total, ready sql.NullInt64
+		if err := rows.Scan(&code, &country, &total, &ready); err != nil {
+			return nil, err
+		}
+		out = append(out, domain.CountryCount{
+			Code:        code.String,
+			Country:     country.String,
+			CountryZH:   domain.CountryChinese(code.String, country.String),
+			CountryFlag: domain.CountryFlag(code.String),
+			Total:       total.Int64,
+			Ready:       ready.Int64,
+		})
+	}
+	return out, rows.Err()
 }
 
 // Get returns one node by id (resolving aliases).

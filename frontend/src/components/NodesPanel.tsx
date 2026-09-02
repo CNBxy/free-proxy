@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../api";
-import type { ProxyNode, ProxySettings } from "../types";
+import type { CountryFacet, ProxyNode, ProxySettings } from "../types";
 import { useUI } from "../store";
 import { Badge, Card, Spinner } from "./ui";
 
 const PAGE = 20;
+// A keystroke is a poor trigger for a round trip: unthrottled, a five-letter
+// query costs five list requests whose answers can land out of order.
+const SEARCH_DEBOUNCE_MS = 300;
 
 export function NodesPanel({ settings, onChanged, favoriteOnly = false }: {
   settings: ProxySettings | null;
@@ -15,36 +18,68 @@ export function NodesPanel({ settings, onChanged, favoriteOnly = false }: {
   const [items, setItems] = useState<ProxyNode[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [country, setCountry] = useState("");
+  const [countries, setCountries] = useState<CountryFacet[]>([]);
   const [ipType, setIpType] = useState("");
   const [status, setStatus] = useState("");
   const [listedOnly, setListedOnly] = useState(false);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState("");
+  // Bumped whenever a job changes the pool, so the country picker recounts.
+  const [poolVersion, setPoolVersion] = useState(0);
+  const requestSeq = useRef(0);
 
   const favorites = new Set(settings?.favorite_node_ids ?? []);
 
+  useEffect(() => {
+    const next = searchInput.trim();
+    if (next === search) return;
+    const timer = setTimeout(() => {
+      setPage(0);
+      setSearch(next);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchInput, search]);
+
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     try {
       const res = await api.listProxies({
-        limit: PAGE, offset: page * PAGE, search, ip_type: ipType, status,
+        limit: PAGE, offset: page * PAGE, search, country, ip_type: ipType, status,
         favorite: favoriteOnly,
         listed_only: !favoriteOnly && listedOnly,
       });
+      // Typing leaves several requests in flight even with the debounce; only
+      // the newest may write to the table.
+      if (seq !== requestSeq.current) return;
       setItems(res.items);
       setTotal(res.total);
     } catch (e) {
-      push("error", (e as Error).message);
+      if (seq === requestSeq.current) push("error", (e as Error).message);
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
-  }, [page, search, ipType, status, listedOnly, favoriteOnly, push]);
+  }, [page, search, country, ipType, status, listedOnly, favoriteOnly, push]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // The country picker follows every filter except the country itself, so
+  // picking one does not empty the list it was picked from.
+  useEffect(() => {
+    let live = true;
+    api.listProxyCountries({
+      ip_type: ipType, status, favorite: favoriteOnly, listed_only: !favoriteOnly && listedOnly,
+    })
+      .then((res) => { if (live) setCountries(res.items.filter((c) => c.code !== "")); })
+      .catch(() => { /* the table still works without the picker */ });
+    return () => { live = false; };
+  }, [ipType, status, listedOnly, favoriteOnly, poolVersion]);
 
   async function runJob(label: string, fn: () => Promise<{ id: string }>) {
     setBusy(label);
@@ -52,6 +87,7 @@ export function NodesPanel({ settings, onChanged, favoriteOnly = false }: {
       const job = await fn();
       await api.waitJob(job.id);
       push("ok", `${label}完成`);
+      setPoolVersion((v) => v + 1);
       await load();
       onChanged();
     } catch (e) {
@@ -59,6 +95,18 @@ export function NodesPanel({ settings, onChanged, favoriteOnly = false }: {
     } finally {
       setBusy("");
     }
+  }
+
+  const filtered = !!(search || country || ipType || status || listedOnly);
+
+  function resetFilters() {
+    setPage(0);
+    setSearchInput("");
+    setSearch("");
+    setCountry("");
+    setIpType("");
+    setStatus("");
+    setListedOnly(false);
   }
 
   async function favorite(id: string) {
@@ -116,8 +164,27 @@ export function NodesPanel({ settings, onChanged, favoriteOnly = false }: {
       }
     >
       <div className="flex flex-wrap gap-2 mb-4">
-        <input className="field flex-1 min-w-[200px]" placeholder="搜索 IP / 主机名 / 国家 / ASN"
-          value={search} onChange={(e) => { setPage(0); setSearch(e.target.value); }} />
+        <div className="relative flex-1 min-w-[220px]">
+          <input className="field pr-8" placeholder="搜索 国家 / 城市 / IP / 机构 / ASN（空格分隔多个条件）"
+            value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
+          {searchInput && (
+            <button type="button" aria-label="清空搜索" title="清空搜索"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-3 hover:text-ink text-sm leading-none"
+              onClick={() => setSearchInput("")}>✕</button>
+          )}
+        </div>
+        <select className="field w-auto max-w-[210px]" value={country}
+          onChange={(e) => { setPage(0); setCountry(e.target.value); }}>
+          <option value="">全部国家/地区</option>
+          {country && !countries.some((c) => c.code === country) && (
+            <option value={country}>{country}</option>
+          )}
+          {countries.map((c) => (
+            <option key={c.code} value={c.code}>
+              {`${c.country_flag || "🏳"} ${c.country_zh || c.country || c.code}（${c.total}）`}
+            </option>
+          ))}
+        </select>
         <select className="field w-auto" value={ipType} onChange={(e) => { setPage(0); setIpType(e.target.value); }}>
           <option value="">全部类型</option>
           <option value="residential">住宅</option>
@@ -137,6 +204,7 @@ export function NodesPanel({ settings, onChanged, favoriteOnly = false }: {
             onChange={(e) => { setPage(0); setListedOnly(e.target.checked); }} />
           仅来源最新名单
         </label>}
+        {filtered && <button className="btn" onClick={resetFilters}>清除筛选</button>}
         <button className="btn" onClick={load} disabled={loading}>{loading ? <Spinner /> : "刷新"}</button>
       </div>
 
@@ -149,13 +217,14 @@ export function NodesPanel({ settings, onChanged, favoriteOnly = false }: {
           并由后台探活自动删除确认失效的节点，因此“未在名单”不代表不可用。
         </>}
         “切换节点”会立即使用该节点，并自动改为固定节点；“测试节点”只检查连接和延迟，不会切换当前节点。
+        搜索支持中文国家名、城市、机构、ASN 和 IP（例如“日本 东京”“韩国 SK”），多个关键词用空格分隔，需同时满足。
       </p>
       <div className="overflow-x-auto rounded-md border border-rule">
         <table className="w-full min-w-[980px] border-collapse">
           <thead>
             <tr>
               <th className="th w-8"></th>
-              <th className="th">国家 / 机构</th>
+              <th className="th">国家 / 地区 / 机构</th>
               <th className="th">IP</th>
               <th className="th">类型</th>
               <th className="th">状态</th>
@@ -169,7 +238,10 @@ export function NodesPanel({ settings, onChanged, favoriteOnly = false }: {
           <tbody>
             {items.length === 0 && (
               <tr><td className="td text-center text-ink-3 py-8" colSpan={10}>
-                {loading ? "加载中…" : favoriteOnly ? "暂无收藏节点，请先在节点页面收藏常用节点。" : "暂无节点，点击“更新并检测节点”开始。"}
+                {loading ? "加载中…"
+                  : filtered ? "没有符合当前条件的节点，可换个关键词或点击“清除筛选”。"
+                  : favoriteOnly ? "暂无收藏节点，请先在节点页面收藏常用节点。"
+                  : "暂无节点，点击“更新并检测节点”开始。"}
               </td></tr>
             )}
             {items.map((n) => (
@@ -179,9 +251,12 @@ export function NodesPanel({ settings, onChanged, favoriteOnly = false }: {
                     checked={selected.has(n.id)} onChange={() => toggleSel(n.id)} />
                 </td>
                 <td className="td">
-                  <div className="font-medium">{n.country || n.country_code || "—"}</div>
-                  <div className="text-xs text-ink-3 truncate max-w-[240px]" title={n.host_name || ""}>
-                    {n.owner || n.as_name || n.host_name || "—"}
+                  <div className="font-medium whitespace-nowrap" title={n.country || n.country_code || ""}>
+                    <span className="mr-1.5">{n.country_flag || "🏳"}</span>
+                    {n.country_zh || n.country || n.country_code || "—"}
+                  </div>
+                  <div className="text-xs text-ink-3 truncate max-w-[260px]" title={detailOf(n)}>
+                    {detailOf(n) || "—"}
                   </div>
                 </td>
                 <td className="td font-mono text-[0.8rem]">{n.ip_address}<div className="text-xs text-ink-3 font-sans">{n.transport}</div></td>
@@ -229,6 +304,21 @@ export function NodesPanel({ settings, onChanged, favoriteOnly = false }: {
       </div>
     </Card>
   );
+}
+
+// The enrichment API is asked for Chinese, so location reads "日本 东京都 涩谷区".
+// The country already leads the cell, so only what follows it is worth
+// repeating — with the operator after it, since a node is identified as much by
+// who runs it as by where it is.
+function detailOf(n: ProxyNode) {
+  let address = (n.location || "").trim();
+  for (const prefix of [n.country_zh, n.country]) {
+    if (prefix && address.startsWith(prefix)) {
+      address = address.slice(prefix.length).trim();
+      break;
+    }
+  }
+  return [address, n.owner || n.as_name || n.host_name].filter(Boolean).join(" · ");
 }
 
 function ipLabel(t: string) {

@@ -155,6 +155,22 @@ func (h *Handlers) ListProxies(c *echo.Context) error {
 	return c.JSON(http.StatusOK, domain.ProxyNodePage{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
+// ListProxyCountries backs the console's country picker. It takes the same
+// filters as ListProxies minus the country itself, so the picker always shows
+// every country reachable from the current view, with its node counts.
+func (h *Handlers) ListProxyCountries(c *echo.Context) error {
+	filter := store.NodeFilter{
+		IPType: c.QueryParam("ip_type"), Status: c.QueryParam("status"),
+		FavoriteOnly: c.QueryParam("favorite") == "true",
+		ListedOnly:   c.QueryParam("listed_only") == "true",
+	}
+	items, err := h.Deps.Repos.Nodes.CountryCounts(c.Request().Context(), filter)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, map[string]any{"items": items})
+}
+
 func (h *Handlers) DiscoverProxies(c *echo.Context) error {
 	job, err := h.Deps.Jobs.Submit(c.Request().Context(), "discover-proxies", h.Deps.Discovery.DiscoverJob)
 	if err != nil {

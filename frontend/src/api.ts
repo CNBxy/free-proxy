@@ -1,6 +1,6 @@
 import type {
-  AccessConfig, AppSettings, AuthConfig, GatewayStatus, Job, LogEntry, PoolStatistics, ProxyHealthResult,
-  ProxyNodePage, ProxySettings, SystemDiagnostics, SystemStatus,
+  AccessConfig, AppSettings, AuthConfig, CountryFacet, GatewayStatus, Job, LogEntry, PoolStatistics,
+  ProxyHealthResult, ProxyNodePage, ProxySettings, SystemDiagnostics, SystemStatus,
 } from "./types";
 
 const API = "./api/v1";
@@ -55,10 +55,16 @@ export const updateCredentials = (payload: Record<string, unknown>) =>
   request("/auth/credentials", { method: "PUT", body: JSON.stringify(payload) });
 
 // ---- proxies ----
-export function listProxies(params: Record<string, string | number | boolean>) {
+function query(params: Record<string, string | number | boolean>) {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== "" && v !== undefined) q.set(k, String(v));
-  return request<ProxyNodePage>(`/proxies?${q.toString()}`);
+  return q.toString();
+}
+export function listProxies(params: Record<string, string | number | boolean>) {
+  return request<ProxyNodePage>(`/proxies?${query(params)}`);
+}
+export function listProxyCountries(params: Record<string, string | number | boolean>) {
+  return request<{ items: CountryFacet[] }>(`/proxies/countries?${query(params)}`);
 }
 export const discover = () => post("/proxies/discover") as Promise<Job>;
 export const refresh = () => post("/proxies/refresh") as Promise<Job>;

@@ -83,9 +83,9 @@ export function SettingsPanel({ settings, onChanged }: { settings: ProxySettings
           </label>
           {form.routing_mode === "country" && (
             <label className="block">
-              <span className="text-sm text-ink-2">国家（英文名或代码）</span>
+              <span className="text-sm text-ink-2">国家（中文名、英文名或代码）</span>
               <input className="field mt-1" value={form.force_country}
-                onChange={(e) => set({ force_country: e.target.value })} placeholder="例如 Japan 或 JP" />
+                onChange={(e) => set({ force_country: e.target.value })} placeholder="例如 日本、Japan 或 JP" />
             </label>
           )}
           {form.routing_mode === "fixed" && (

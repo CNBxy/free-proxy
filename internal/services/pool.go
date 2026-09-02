@@ -94,8 +94,7 @@ func ApplyFilters(nodes []domain.ProxyNodeRead, settings domain.ProxySettings, i
 				continue
 			}
 		case domain.PolicyCountry:
-			if settings.ForceCountry != "" &&
-				domain.NormalizeCountry(n.Country) != domain.NormalizeCountry(settings.ForceCountry) {
+			if !domain.SameCountry(n.Country, n.CountryCode, settings.ForceCountry) {
 				continue
 			}
 		case domain.PolicyFavorites:
