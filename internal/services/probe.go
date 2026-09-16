@@ -60,14 +60,20 @@ func NewProbeService(nodes *store.NodeRepository, mgr *tunnel.Manager, tunAlloc 
 
 // Probe tests a single node, updating its state and (optionally) enriching IP info.
 func (s *ProbeService) Probe(ctx context.Context, nodeID string, enrich bool) (domain.ProbeResult, error) {
-  if s.unreachableOverTCP(ctx, target) {
-    return s.recordUnreachable(ctx, nodeID), nil
-  }
+	target, err := s.nodes.GetTarget(ctx, nodeID)
+	if err != nil {
+		return domain.ProbeResult{}, err
+	}
+
+	if s.unreachableOverTCP(ctx, target) {
+		return s.recordUnreachable(ctx, nodeID), nil
+	}
+
 	var latency int
 	var tun domain.TunnelStartResult
-	var ipAddress string
+	ipAddress := target.IPAddress
 
-	err := func() error {
+	err = func() error {
 		// The semaphore covers everything, not just the OpenVPN dial. ProbeMany
 		// starts one goroutine per node, so whatever sits above this line runs at
 		// the full width of the batch — and that used to include loading the
@@ -81,11 +87,6 @@ func (s *ProbeService) Probe(ctx context.Context, nodeID string, enrich bool) (d
 		}
 		defer func() { <-s.sem }()
 
-		target, err := s.nodes.GetTarget(ctx, nodeID)
-		if err != nil {
-			return err
-		}
-		ipAddress = target.IPAddress
 		_ = s.nodes.MarkProbing(ctx, nodeID)
 
 		device, release, allocErr := s.tunAlloc.Allocate()

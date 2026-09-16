@@ -119,7 +119,7 @@ func (m *LeastUsersMonitor) Rebalance(ctx context.Context) error {
 			excluded[best.ID] = true
 			continue
 		}
-		_ = m.nodes.Blacklist(ctx, best.ID, rebalanceFailureMessage(res.Message), m.cfg.InvalidBackoff())
+		_ = m.nodes.Blacklist(ctx, best.ID, rebalanceFailureMessage(res.Message), config.InvalidBackoff)
 		excluded[best.ID] = true
 	}
 	return nil

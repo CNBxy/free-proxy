@@ -24,7 +24,7 @@ func newTestProber(t *testing.T, repos *store.Repos, reachable map[string]bool) 
 	if err != nil {
 		t.Fatalf("tun allocator: %v", err)
 	}
-	svc := NewProbeService(cfg, repos.Nodes, tunnel.NewManager(cfg), tunAlloc,
+	svc := NewProbeService(repos.Nodes, tunnel.NewManager(cfg), tunAlloc,
 		netx.SystemCommandRunner{}, nil, repos.Probes, NewCoordinator())
 	svc.dial = func(_ context.Context, addr string, _ time.Duration) bool { return reachable[addr] }
 	return svc

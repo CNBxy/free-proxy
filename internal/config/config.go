@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/caarlos0/env/v11"
 
@@ -205,7 +206,7 @@ func (c *Config) EnsureDirectories() error {
 func (c *Config) ConfigsDir() string { return filepath.Join(c.DataDir, "configs") }
 func (c *Config) LogsDir() string    { return filepath.Join(c.DataDir, "logs") }
 func (c *Config) LeastUsersCheckInterval() time.Duration {
-  return secs(c.LeastUsersCheckIntervalSecs)
+	return time.Duration(c.LeastUsersCheckIntervalSecs * float64(time.Second))
 }
 func expandUser(p string) string {
 	if p == "~" || strings.HasPrefix(p, "~/") {

@@ -62,10 +62,19 @@ func seedLeastUsers(t *testing.T, repos *store.Repos) {
 	if _, err := repos.Nodes.UpsertDiscovered(context.Background(), nodes); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	sessions := map[string]int{"res-busy": 40, "res-quiet": 2, "mob": 7, "host": 99}
-	for id, sessionsN := range sessions {
-		if _, err := repos.DB.Exec("UPDATE proxy_nodes SET source_sessions = ?, status = 'ready' WHERE id = ?",
-			sessionsN, id); err != nil {
+	type nodeUpdate struct {
+		sessions int
+		ipType   string
+	}
+	updates := map[string]nodeUpdate{
+		"res-busy": {40, string(domain.IpResidential)},
+		"res-quiet": {2, string(domain.IpResidential)},
+		"mob":      {7, string(domain.IpMobile)},
+		"host":     {99, string(domain.IpHosting)},
+	}
+	for id, u := range updates {
+		if _, err := repos.DB.Exec("UPDATE proxy_nodes SET source_sessions = ?, status = 'ready', ip_type = ? WHERE id = ?",
+			u.sessions, u.ipType, id); err != nil {
 			t.Fatalf("update %s: %v", id, err)
 		}
 	}
@@ -231,6 +240,9 @@ func TestRebalanceBlacklistsFailingCandidateAndMovesOn(t *testing.T) {
 	gw.failIDs["mob-quiet"] = false
 	if _, err := repos.DB.Exec("DELETE FROM node_blacklist WHERE node_id = 'mob-quiet'"); err != nil {
 		t.Fatalf("clear blacklist: %v", err)
+	}
+	if _, err := repos.DB.Exec("UPDATE proxy_nodes SET status = 'ready', cooldown_until = NULL WHERE id = 'mob-quiet'"); err != nil {
+		t.Fatalf("restore status: %v", err)
 	}
 	if err := m.Rebalance(context.Background()); err != nil {
 		t.Fatalf("second Rebalance: %v", err)
