@@ -112,7 +112,6 @@ function QualityBracketEditor({ metric, brackets, onChange }: {
   onChange: (brackets: QualityBracket[]) => void;
 }) {
   const unit = METRIC_UNITS[metric];
-  const isSpeed = metric === "speed";
 
   const updateBracket = (index: number, field: keyof QualityBracket, value: number) => {
     const newBrackets = [...brackets];
@@ -132,11 +131,29 @@ function QualityBracketEditor({ metric, brackets, onChange }: {
   return (
     <div className="space-y-2">
       <div className="text-xs text-ink-3 font-medium">质量分配置 ({unit})</div>
+      <div className="flex items-center gap-2 text-xs text-ink-3 font-medium">
+        <span className="w-16 text-right">最小值</span>
+        <span>~</span>
+        <span className="w-16">最大值</span>
+        <span>→</span>
+        <span className="w-16">质量分</span>
+        <span className="w-6"></span>
+      </div>
       {brackets.map((b, i) => (
         <div key={i} className="flex items-center gap-2 text-xs">
-          <span className="text-ink-3 w-8 text-right">{isSpeed ? "≥" : ""}{b.min}</span>
+          <input
+            type="number"
+            className="w-16 px-1.5 py-0.5 border border-rule rounded text-xs text-right"
+            value={b.min}
+            onChange={(e) => updateBracket(i, "min", Number(e.target.value))}
+          />
           <span className="text-ink-3">~</span>
-          <span className="text-ink-3 w-8">{isSpeed ? "∞" : b.max}</span>
+          <input
+            type="number"
+            className="w-16 px-1.5 py-0.5 border border-rule rounded text-xs"
+            value={b.max}
+            onChange={(e) => updateBracket(i, "max", Number(e.target.value))}
+          />
           <span className="text-ink-3">→</span>
           <input
             type="number"
@@ -164,7 +181,7 @@ function QualityBracketEditor({ metric, brackets, onChange }: {
   );
 }
 
-function PriorityOrderEditor({ priorities, onChange }: {
+function ScoringEditor({ priorities, onChange }: {
   priorities: PriorityOrder[];
   onChange: (priorities: PriorityOrder[]) => void;
 }) {
@@ -198,14 +215,14 @@ function PriorityOrderEditor({ priorities, onChange }: {
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-xs text-ink-3">
-          优先顺排序（权重合计: {totalWeight.toFixed(2)}）
+          评分维度（权重合计: {totalWeight.toFixed(2)}）
         </span>
         <button
           type="button"
           className="text-xs text-primary hover:underline"
           onClick={addPriority}
         >
-          + 添加优先顺
+          + 添加评分维度
         </button>
       </div>
       {priorities.map((p, i) => (
@@ -227,7 +244,7 @@ function PriorityOrderEditor({ priorities, onChange }: {
             >
               ↓
             </button>
-            <span className="text-xs font-medium">第{i + 1}</span>
+            <span className="text-xs font-medium">维度{i + 1}</span>
             <select
               className="flex-1 text-xs px-1.5 py-0.5 border border-rule rounded"
               value={p.metric}
@@ -389,11 +406,11 @@ export function SettingsPanel({ settings, onChanged }: { settings: ProxySettings
         </p>
       </Card>
 
-      <Card title="优先顺排序">
+      <Card title="评分权重配置">
         <p className="text-xs text-ink-3 mb-3">
-          配置节点选择的优先顺和权重。系统会在每次轮换时根据权重 × 质量分的合计值选择得分最高的节点。
+          配置节点评分的维度和权重。系统在每次轮换时，对每个维度计算「权重 × 质量分」，合计得分最高的节点被选中。每个维度的质量分区间可展开配置。
         </p>
-        <PriorityOrderEditor
+        <ScoringEditor
           priorities={form.priority_order}
           onChange={(priorities) => set({ priority_order: priorities })}
         />
