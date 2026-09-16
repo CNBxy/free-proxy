@@ -50,9 +50,16 @@ const (
 	PolicySpeedFirst       ProxyPolicyMode = "speed_first"
 	PolicySmart            ProxyPolicyMode = "smart"
 	PolicyResidentialFirst ProxyPolicyMode = "residential_first"
-	PolicyCountry          ProxyPolicyMode = "country"
-	PolicyFixed            ProxyPolicyMode = "fixed"
-	PolicyFavorites        ProxyPolicyMode = "favorites"
+	// Least-users policies pick, among ready nodes of exactly one IP class
+	// (residential, mobile, hosting), the exit with the lowest current user
+	// count (source sessions), keep that choice on failure, and re-balance to
+	// the least-used node on the periodic check.
+	PolicyResidentialLeastUsers ProxyPolicyMode = "residential_least_users"
+	PolicyMobileLeastUsers      ProxyPolicyMode = "mobile_least_users"
+	PolicyHostingLeastUsers     ProxyPolicyMode = "hosting_least_users"
+	PolicyCountry               ProxyPolicyMode = "country"
+	PolicyFixed                 ProxyPolicyMode = "fixed"
+	PolicyFavorites             ProxyPolicyMode = "favorites"
 )
 
 type RoutingIpType string

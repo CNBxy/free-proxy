@@ -1,6 +1,16 @@
 export type IpType = "residential" | "mobile" | "hosting" | "unknown";
 export type NodeStatus = "discovered" | "probing" | "ready" | "unavailable" | "cooldown";
-export type PolicyMode = "auto" | "speed_first" | "smart" | "residential_first" | "country" | "fixed" | "favorites";
+export type PolicyMode =
+  | "auto"
+  | "speed_first"
+  | "smart"
+  | "residential_first"
+  | "residential_least_users"
+  | "mobile_least_users"
+  | "hosting_least_users"
+  | "country"
+  | "fixed"
+  | "favorites";
 export type RoutingIpType = "all" | "residential" | "hosting";
 
 export interface AccessConfig {

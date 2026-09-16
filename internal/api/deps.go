@@ -37,4 +37,5 @@ type Deps struct {
 	ActiveLatencyMon *services.ActiveLatencyMonitor
 	HealthMon        *services.HealthMonitor
 	LivenessMon      *services.LivenessMonitor
+	LeastUsersMon    *services.LeastUsersMonitor
 }

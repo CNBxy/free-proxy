@@ -46,6 +46,7 @@ type Config struct {
 	// Machine-level values intentionally remain environment-backed.
 	//
 	// TunnelInterface, ProbeDevicePrefix and PolicyRoutingTable all name things
+  
 	// in namespaces shared with every other program on the host, and
 	// OpenVPNCommand names a binary whose path is the host's business. Their
 	// defaults come from internal/naming rather than literals here, so the
@@ -68,6 +69,12 @@ type Config struct {
 	PolicyRoutingTable int `env:"POLICY_ROUTING_TABLE"`
 	TestTunStart       int
 	TestTunEnd         int
+  
+  // LeastUsersCheckIntervalSecs is how often the least-users routing modes
+  // re-check that the active exit is still the least-used node of its IP
+  // class (default: every 5 minutes).
+  LeastUsersCheckIntervalSecs float64 `env:"LEAST_USERS_CHECK_INTERVAL_SECONDS" envDefault:"300"`
+  MaintenanceEnabled          bool    `env:"MAINTENANCE_ENABLED" envDefault:"true"` 
 }
 
 // Load parses the environment into a Config, applies derived defaults, and
@@ -197,7 +204,9 @@ func (c *Config) EnsureDirectories() error {
 
 func (c *Config) ConfigsDir() string { return filepath.Join(c.DataDir, "configs") }
 func (c *Config) LogsDir() string    { return filepath.Join(c.DataDir, "logs") }
-
+func (c *Config) LeastUsersCheckInterval() time.Duration {
+  return secs(c.LeastUsersCheckIntervalSecs)
+}
 func expandUser(p string) string {
 	if p == "~" || strings.HasPrefix(p, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {

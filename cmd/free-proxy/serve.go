@@ -112,6 +112,7 @@ func buildDeps(ctx context.Context, cfg *config.Config, repos *store.Repos, auth
 		ActiveLatencyMon: services.NewActiveLatencyMonitor(repos.Nodes, gateway, runner),
 		HealthMon:        services.NewHealthMonitor(health, gateway),
 		LivenessMon:      services.NewLivenessMonitor(liveness),
+		LeastUsersMon:    services.NewLeastUsersMonitor(cfg, repos.Nodes, repos.Settings, gateway),
 	}
 }
 
@@ -167,9 +168,11 @@ func runServe(ctx context.Context, cfg *config.Config, hostOverride string, port
 	// that stops working a few hours later.
 	go deps.HealthMon.Run(ctx)
 	go deps.ActiveLatencyMon.Run(ctx)
+  // Re-balance the exit toward the least-used node for the least-users
+	// routing modes; a no-op for every other mode.
+  go deps.LeastUsersMon.Run(ctx)
 	go deps.MaintenanceMon.Run(ctx)
 	go deps.LivenessMon.Run(ctx)
-
 	// Bind all interfaces; external web access is gated at runtime by the admin
 	// toggle (default on) — see api.ExternalAccessGuard. A --host flag still wins.
 	host := firstNonEmptyStr(hostOverride, "0.0.0.0")
