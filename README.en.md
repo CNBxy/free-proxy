@@ -4,7 +4,9 @@
 
 > Run **a single command** on an overseas VPS and it automatically pulls hundreds of free exit nodes from public sources (VPNGate), runs real speed tests, intelligently picks the fastest routes, and exposes a stable **SOCKS5 / HTTP proxy**. When a node drops, it switches automatically — no babysitting required.
 
-> 🎥 Demo video: [YouTube](https://youtu.be/0uf9St0cBM8)
+🎥 [Free Residential IP Proxy Setup Tutorial | Deploy a SOCKS5 / HTTP Proxy on a VPS With One Command | FreeProxy](https://youtu.be/0uf9St0cBM8)
+
+🎥 [Get 100+ Residential IPs for Free! Free-Proxy Update + Hands-On v2rayN Upstream Proxy Tutorial](https://youtu.be/eTeM7bPE60Q)
 
 <p>
   <img alt="One-command deploy" src="https://img.shields.io/badge/Deploy-One%20Command-brightgreen">
@@ -76,12 +78,14 @@ The script automatically: downloads the build for your architecture → installs
 After the first install, the script **prints directly** the randomly generated path, username, and password:
 
 ```text
-URL:       http://<你的服务器IP>:39527/xxxxxxxxxxxx/
+URL:       http://<your-server-ip>:39527/xxxxxxxxxxxx/
+Path:      /xxxxxxxxxxxx/
 Username:  xxxxxxxx
 Password:  xxxxxxxx
 ```
 
-> 🔑 The path, username, and password are randomly generated only on the **first install**, with no defaults. Save them immediately because the password cannot be recovered later.
+> 🔑 The path, username, and password are randomly generated only on the **first install**, with no defaults.
+> 😌 **Forgot them? Nothing needs to be reset**: run `free-proxy credentials` at any time and it prints the path, username, and password again — without restarting the service or dropping the current tunnel.
 > 🔒 Re-running the installer for an update preserves the existing path, username, and password. To change them explicitly, use the dashboard or run `free-proxy install --rotate-admin`.
 
 ✅ **Done!** The service is already fetching nodes, running speed tests, and connecting in the background. Next, let's see how to use it.
@@ -134,21 +138,50 @@ If you see an IP different from your VPS, the proxy is already forwarding throug
 
 ---
 
+## 🔑 Forgot the Admin Path / Username / Password?
+
+Run this on the server. It **prints the admin URL, path, username, and password directly** — it resets nothing, restarts nothing, and does not drop the current tunnel:
+
+```bash
+sudo free-proxy credentials
+```
+
+```text
+URL:      http://<your-server-ip>:39527/<your-admin-path>/
+Path:     /<your-admin-path>/
+Username: <admin-username>
+Password: <admin-password>
+```
+
+Add `--json` when you need it in a script:
+
+```bash
+sudo free-proxy credentials --json
+# {"url":"...","path":"/xxxx/","port":39527,"username":"xxxx","password":"xxxx"}
+```
+
+> 💡 The password is stored next to its scrypt hash in `/var/lib/free-proxy/free-proxy.db` (file mode `0600`, readable by `root` only), so this command needs `root`.
+> ⬆️ **Upgrading from an older version needs no manual work**: older versions stored only the password hash, so it cannot be read back — the upgrade (re-running the one-command install) therefore **resets the password once and prints the new one**, keeping your management path and username unchanged. The reset happens during the install, which restarts the service anyway, so there is no extra interruption. After that the password stays put: just run `credentials` whenever you forget it.
+
+---
+
 ## 🔧 Common Commands
 
 ```bash
-free-proxy credentials   # 查看管理网址与账号密码
-free-proxy status        # 查看运行状态
-free-proxy logs -n 100   # 查看最近日志
-free-proxy uninstall     # 卸载(加 --purge-data 连数据一起删除)
+free-proxy credentials   # Print the admin URL, path, username, and password (use this when you forget them)
+free-proxy status        # Show configuration and database status
+free-proxy logs --lines 100  # Show recent logs
+free-proxy admin-config --password 'NEW_PASSWORD'   # Change the admin password
+free-proxy uninstall     # Uninstall (add --purge-data to delete the data too)
 ```
 
-**Update to the latest version**: just run the "one-command install" above again. Node data, settings, admin path, username, and password are all preserved.
+**Update to the latest version**: just run the "one-command install" above again. Node data, settings, admin path, username, and password are all preserved — with one exception: upgrading from a version that stored only the password hash resets the password once and prints the new one in the install output (see above).
 
 ---
 
 ## ❓ FAQ
 
+- **Forgot the dashboard address or your login?** Run `sudo free-proxy credentials` on the server: it prints the URL, path, username, and password directly — no password reset, no service restart.
 - **Can't connect / no nodes for now?** Free nodes (VPNGate) fluctuate by nature; the service retries and switches automatically. Wait a bit, or click "Update and check nodes" once in the dashboard.
 - **It says root / TUN is required?** Run it as root and make sure your VPS has TUN/TAP enabled. **[BandwagonHost](https://cutt.ly/qywJNWzd)** / **[DMIT](https://cutt.ly/YywJIzY0)** are both KVM-based, support it by default, and work out of the box.
 - **My VPS is ARM architecture?** No worries — the install script automatically detects amd64 / arm64.
@@ -190,7 +223,7 @@ chmod +x free-proxy && sudo ./free-proxy install
 free-proxy serve                 # 运行控制台 + 代理网关 + 后台任务
 free-proxy install               # 一键安装:二进制 + 依赖 + 环境文件 + 服务(需 root)
 free-proxy uninstall             # 卸载服务与二进制,--purge-data 同时删数据(需 root)
-free-proxy credentials           # 打印管理地址与一次性密码
+free-proxy credentials [--json]  # Print the admin URL, path, username, and password
 free-proxy discover              # 拉取并存储节点
 free-proxy status                # 打印配置与数据库表
 free-proxy preflight             # 启动前环境检查
@@ -208,19 +241,14 @@ The production config file defaults to `/etc/free-proxy/free-proxy.env` (generat
 ```text
 FREE_PROXY_DATA_DIR=/var/lib/free-proxy
 FREE_PROXY_DATABASE_URL=
-FREE_PROXY_SQL_ECHO=false
 FREE_PROXY_ALLOW_PROCESS_RESTART=true
 FREE_PROXY_OPENVPN_COMMAND=openvpn
-FREE_PROXY_OPENVPN_USERNAME=vpn
-FREE_PROXY_OPENVPN_PASSWORD=vpn
 FREE_PROXY_TUNNEL_INTERFACE=fpx0
 FREE_PROXY_PROBE_DEVICE_PREFIX=fpx
-FREE_PROXY_TEST_TUN_START=1
-FREE_PROXY_TEST_TUN_END=64
 FREE_PROXY_POLICY_ROUTING_TABLE=9527
 ```
 
-> Web port, proxy port, credentials, discovery, maintenance, DNS, routing, and external-access options are managed in the dashboard and stored in SQLite.
+> The dashboard configures exactly ten things: admin username, password, management path, web port and external access; proxy username, password, port, enable switch and external access. Everything else — intervals, timeouts, concurrency, data sources — is a constant in the binary.
 
 ### Coexisting with 3x-ui and other panels
 
@@ -246,7 +274,7 @@ Upgrades are migrated automatically: `free-proxy install` rewrites configuration
 
 On low-spec VPSes (e.g. 1 core / 1 GB) you can lower the probe load:
 
-Use the dashboard to lower probe concurrency, discovery limit, and initial test count.
+Tuning values — probe concurrency, discovery limit, check intervals, timeouts — are constants in the binary rather than settings, chosen to run on a 1-core / 1 GB box.
 
 ### API Overview
 
@@ -269,7 +297,7 @@ GET    /api/v1/logs              GET  /api/v1/logs/export
 
 - **Go 1.23+**, Echo v5 (Web/API), sqlc + `modernc.org/sqlite` (pure Go, no CGO), goose (embedded migrations), cobra (CLI), log/slog.
 - Frontend **React 19 + Vite + Tailwind v4 + Zustand**, with the build output embedded into the binary via `//go:embed`.
-- Passwords hashed with `scrypt`; authentication via a random secret path + session cookie.
+- Passwords hashed with `scrypt`; authentication via a random secret path + session cookie. The admin password is additionally kept in a readable form inside the `0600`, root-only database so `free-proxy credentials` can print it (login always verifies against the hash); the proxy password is stored as a hash only.
 
 ### Building From Source
 

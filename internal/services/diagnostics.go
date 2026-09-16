@@ -37,9 +37,6 @@ func NewDiagnosticsService(cfg *config.Config, runner netx.CommandRunner) *Diagn
 	return &DiagnosticsService{cfg: cfg, runner: runner}
 }
 
-// AutoRepairEnabled reports whether automatic DNS repair is enabled.
-func (d *DiagnosticsService) AutoRepairEnabled() bool { return d.cfg.DNSRepairEnabled }
-
 func linux() bool { return runtime.GOOS == "linux" }
 
 // Diagnose runs all readiness checks.
@@ -62,7 +59,7 @@ func (d *DiagnosticsService) Diagnose(ctx context.Context, forStartup bool) doma
 		d.defaultRouteCheck(ctx),
 		d.sysctlCheck(ctx, "ipv4_forwarding", "net.ipv4.ip_forward", "1"),
 		d.sysctlCheck(ctx, "rp_filter", "net.ipv4.conf.all.rp_filter", "0", "2"),
-		d.dnsCheck(providerHost(d.cfg.VPNGateAPIURL)),
+		d.dnsCheck(providerHost(config.VPNGateAPIURL)),
 		d.portCheck(forStartup),
 	}
 	d.mu.Lock()
@@ -87,9 +84,6 @@ func (d *DiagnosticsService) StartupPreflight(ctx context.Context) domain.System
 
 // RepairDNS reconfigures systemd-resolved DNS for the default interface.
 func (d *DiagnosticsService) RepairDNS(ctx context.Context) (domain.DnsRepairResult, error) {
-	if !d.cfg.DNSRepairEnabled {
-		return domain.DnsRepairResult{}, fmt.Errorf("%w: DNS repair is disabled", domain.ErrNetworkOperation)
-	}
 	if !linux() {
 		return domain.DnsRepairResult{}, fmt.Errorf("%w: DNS repair is Linux-only", domain.ErrNetworkOperation)
 	}
@@ -101,10 +95,11 @@ func (d *DiagnosticsService) RepairDNS(ctx context.Context) (domain.DnsRepairRes
 	if err != nil || route.ReturnCode != 0 || iface == "" {
 		return domain.DnsRepairResult{}, fmt.Errorf("%w: cannot determine default interface", domain.ErrNetworkOperation)
 	}
-	servers := d.cfg.ParsedDNSRepairServers()
-	if len(servers) == 0 {
-		return domain.DnsRepairResult{}, fmt.Errorf("%w: no DNS repair servers configured", domain.ErrNetworkOperation)
-	}
+	// The repair used to sit behind an enabled/disabled switch. Asking for it is
+	// already the decision — it only ever runs from an explicit dashboard action
+	// — so the switch did nothing but let an operator turn the button into an
+	// error message.
+	servers := config.DNSRepairServers
 	commands := [][]string{
 		append([]string{"resolvectl", "dns", iface}, servers...),
 		{"resolvectl", "domain", iface, "~."},
@@ -292,7 +287,7 @@ func (d *DiagnosticsService) dnsCheck(host string) domain.DiagnosticCheck {
 
 // DiagnoseProviderFailure records provider-connectivity checks after a failure.
 func (d *DiagnosticsService) DiagnoseProviderFailure(ctx context.Context, cause error) []domain.DiagnosticCheck {
-	host := providerHost(d.cfg.VPNGateAPIURL)
+	host := providerHost(config.VPNGateAPIURL)
 	checks := []domain.DiagnosticCheck{
 		{Name: "provider_last_error", OK: false, Detail: cause.Error()},
 		d.dnsCheck(host),

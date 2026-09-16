@@ -63,7 +63,7 @@ func discoverCmd() *cobra.Command {
 				return err
 			}
 			defer db.Close()
-			provider := vpngate.NewProvider(cfg)
+			provider := vpngate.NewProvider()
 			svc := services.NewDiscoveryService(provider, repos.Nodes)
 			res, err := svc.Discover(cmd.Context())
 			if err != nil {
@@ -77,9 +77,10 @@ func discoverCmd() *cobra.Command {
 }
 
 func credentialsCmd() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "credentials",
-		Short: "Print the current web management address and credentials",
+		Short: "Print the current web management address, path, username, and password",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := loadConfig()
 			if err != nil {
@@ -100,19 +101,35 @@ func credentialsCmd() *cobra.Command {
 			c := adminStore.Config()
 			out := cmd.OutOrStdout()
 			url, note := adminURL(cmd.Context(), c)
-			fmt.Fprintf(out, "URL: %s\n", url)
-			if note != "" {
-				fmt.Fprintf(out, "     %s\n", note)
+			path := "/" + c.SecretPath + "/"
+			if asJSON {
+				enc := json.NewEncoder(out)
+				enc.SetIndent("", "  ")
+				return enc.Encode(map[string]any{
+					"url": url, "path": path, "port": c.Port,
+					"username": c.Username, "password": c.Password,
+				})
 			}
+			fmt.Fprintf(out, "URL:      %s\n", url)
+			if note != "" {
+				fmt.Fprintf(out, "          %s\n", note)
+			}
+			fmt.Fprintf(out, "Path:     %s\n", path)
 			fmt.Fprintf(out, "Username: %s\n", c.Username)
-			if pw := adminStore.BootstrapPassword(); pw != "" {
-				fmt.Fprintf(out, "Password: %s\n", pw)
+			if c.Password != "" {
+				fmt.Fprintf(out, "Password: %s\n", c.Password)
 			} else {
-				fmt.Fprintln(out, "Password: [configured; cannot be recovered]")
+				// Reached only when the binary was replaced without re-running
+				// the installer: `install` resets a hash-only password once.
+				fmt.Fprintln(out, "Password: [set before this version; not recoverable]")
+				fmt.Fprintln(out, "          Run `free-proxy install` (or the install script) — it resets the")
+				fmt.Fprintln(out, "          password once and prints the new one.")
 			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Print the credentials as JSON")
+	return cmd
 }
 
 func statusCmd() *cobra.Command {
@@ -245,6 +262,7 @@ func adminConfigCmd() *cobra.Command {
 				if updated.PasswordHash, err = security.HashPassword(v); err != nil {
 					return err
 				}
+				updated.Password = v
 			}
 			if v, _ := f.GetString("secret-path"); v != "" {
 				updated.SecretPath = v
@@ -258,7 +276,10 @@ func adminConfigCmd() *cobra.Command {
 			if err := adminStore.Update(updated); err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "Administration configuration updated; restart the service if the listener changed")
+			// A running service holds its own snapshot of this configuration, so
+			// nothing here reaches it until it restarts — credentials included.
+			fmt.Fprintln(cmd.OutOrStdout(), "Administration configuration updated; restart the service for it to take effect (systemctl restart free-proxy)")
+			fmt.Fprintln(cmd.OutOrStdout(), "Run `free-proxy credentials` to print the current address, path, username, and password")
 			return nil
 		},
 	}
@@ -356,6 +377,7 @@ func installDepsCmd() *cobra.Command {
 
 func installCmd() *cobra.Command {
 	var rotateAdmin bool
+	var quiet bool
 	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Install Free Proxy on this machine: binary, dependencies, env file, service",
@@ -425,40 +447,64 @@ func installCmd() *cobra.Command {
 				return fmt.Errorf("prune migrated environment: %w", err)
 			}
 			admin := adminStore.Config()
-			password := adminStore.BootstrapPassword()
-			if rotateAdmin {
+			password := admin.Password
+			// Installs from before passwords were stored recoverably have a hash
+			// and nothing else, so their owner has no way to learn the password
+			// again. Reset it once, here: this run restarts the service anyway,
+			// which is the only cost a password change carries.
+			passwordReset := !rotateAdmin && password == ""
+			switch {
+			case rotateAdmin:
 				admin, password, err = adminStore.Rotate()
 				if err != nil {
 					return fmt.Errorf("rotate admin credentials: %w", err)
+				}
+			case passwordReset:
+				admin, password, err = adminStore.ResetPassword()
+				if err != nil {
+					return fmt.Errorf("reset admin password: %w", err)
 				}
 			}
 			if err := platform.InstallService(ctx); err != nil {
 				return fmt.Errorf("install service: %w", err)
 			}
 			fmt.Fprintln(out, "Free Proxy installed and started.")
-			if rotateAdmin {
+			// An update triggered from the console runs this command with its
+			// output going to a file. Credentials are unchanged there, so the
+			// only thing printing them would achieve is a second copy of the
+			// password on disk. A reset still prints: that password is new, and
+			// this is the one place it can be read.
+			if quiet && !rotateAdmin && !passwordReset {
+				fmt.Fprintln(out, "Management path, username and password are unchanged.")
+				fmt.Fprintln(out, "Run `free-proxy credentials` to print them.")
+				return nil
+			}
+			switch {
+			case rotateAdmin:
 				fmt.Fprintln(out, "Management path and admin login were explicitly rotated:")
-			} else if password != "" {
+			case passwordReset:
+				fmt.Fprintln(out, "Your previous password was stored as a hash only and could not be read back,")
+				fmt.Fprintln(out, "so this update reset it once. The management path and username are unchanged:")
+			default:
 				fmt.Fprintln(out, "Management path and admin login (preserved on future updates):")
-			} else {
-				fmt.Fprintln(out, "Existing management path and admin login were preserved:")
 			}
 			url, note := adminURL(ctx, admin)
 			fmt.Fprintf(out, "  URL:       %s\n", url)
 			if note != "" {
 				fmt.Fprintf(out, "             %s\n", note)
 			}
+			fmt.Fprintf(out, "  Path:      /%s/\n", admin.SecretPath)
 			fmt.Fprintf(out, "  Username:  %s\n", admin.Username)
-			if password != "" {
-				fmt.Fprintf(out, "  Password:  %s\n", password)
-			} else {
-				fmt.Fprintln(out, "  Password:  [unchanged; cannot be recovered]")
-			}
+			// Every branch above leaves a readable password behind, so there is
+			// no longer an install that cannot show one.
+			fmt.Fprintf(out, "  Password:  %s\n", password)
 			fmt.Fprintln(out, "Future updates keep this path, username, and password unchanged.")
+			fmt.Fprintln(out, "Forgot them later? Run: free-proxy credentials")
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&rotateAdmin, "rotate-admin", false, "Generate a new random management path, username, and password")
+	cmd.Flags().BoolVar(&quiet, "quiet", false, "Do not print unchanged credentials (used by the console's updater)")
 	return cmd
 }
 

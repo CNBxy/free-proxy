@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/masteralanlab/free-proxy/internal/domain"
 	"github.com/masteralanlab/free-proxy/internal/store/gen"
@@ -46,13 +47,6 @@ func NewRepos(db *sql.DB) *Repos {
 // ---- conversion helpers -----------------------------------------------------
 
 func tstr(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
-
-func tptr(t *time.Time) sql.NullString {
-	if t == nil {
-		return sql.NullString{}
-	}
-	return sql.NullString{String: tstr(*t), Valid: true}
-}
 
 func parseT(s string) time.Time {
 	v, _ := time.Parse(time.RFC3339Nano, s)
@@ -101,6 +95,8 @@ func nodeToRead(n gen.ProxyNode) domain.ProxyNodeRead {
 		ProviderIdentity:    n.ProviderIdentity,
 		Country:             n.Country,
 		CountryCode:         n.CountryCode,
+		CountryZH:           domain.CountryChinese(n.CountryCode, n.Country),
+		CountryFlag:         domain.CountryFlag(n.CountryCode),
 		HostName:            n.HostName,
 		IPAddress:           n.IpAddress,
 		RemoteHost:          n.RemoteHost,
@@ -176,6 +172,89 @@ type NodeFilter struct {
 	ReachableOnly bool
 }
 
+// searchColumns are the columns the console's one search box covers. Country
+// and location arrive from the enrichment API in Chinese, so a Chinese city or
+// ISP name matches here directly; an English country label is reached through
+// the code list searchClause adds.
+var searchColumns = []string{
+	"ip_address", "remote_host", "host_name", "provider_identity",
+	"country", "country_code", "location", "owner", "as_name", "asn",
+}
+
+// Bounds on a search term. A query is typed by hand, so these only keep a
+// pathological paste from building an enormous statement. The length is in
+// runes: cutting a Chinese term mid-character would leave a pattern that
+// matches nothing.
+const (
+	maxSearchTerms     = 6
+	maxSearchTermRunes = 64
+)
+
+// isSearchSeparator ends a term. Whitespace is the obvious one, but a Chinese
+// IME makes "日本，东京" as easy to type as "日本 东京" and it means the same
+// thing here, so the punctuation that separates a list in Chinese counts too.
+func isSearchSeparator(r rune) bool {
+	if unicode.IsSpace(r) {
+		return true
+	}
+	switch r {
+	case ',', ';', '|', '，', '、', '；', '｜':
+		return true
+	}
+	return false
+}
+
+// searchTerms splits a query into terms. They are ANDed, so "日本 住宅" narrows
+// rather than widens — the behaviour anyone who has used a search box expects,
+// and the reason a two-word query used to return nothing.
+func searchTerms(search string) []string {
+	fields := strings.FieldsFunc(search, isSearchSeparator)
+	if len(fields) > maxSearchTerms {
+		fields = fields[:maxSearchTerms]
+	}
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if runes := []rune(f); len(runes) > maxSearchTermRunes {
+			f = string(runes[:maxSearchTermRunes])
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// searchClause matches one term against every searchable column, the id by
+// prefix, and the codes of any country the term names.
+func searchClause(term string) (string, []any) {
+	like := "%" + escapeLike(term) + "%"
+	parts := make([]string, 0, len(searchColumns)+2)
+	args := make([]any, 0, len(searchColumns)+2)
+	for _, col := range searchColumns {
+		parts = append(parts, col+` LIKE ? ESCAPE '\'`)
+		args = append(args, like)
+	}
+	// The id is a country prefix plus a hex digest, so a substring match on it
+	// would answer "beef" or "added" with unrelated nodes. A prefix match still
+	// finds the node whose id was copied out of the fixed-node setting.
+	parts = append(parts, `id LIKE ? ESCAPE '\'`)
+	args = append(args, escapeLike(term)+"%")
+	if codes := domain.MatchCountryCodes(term); len(codes) > 0 {
+		holders := make([]string, len(codes))
+		for i, code := range codes {
+			holders[i] = "?"
+			args = append(args, code)
+		}
+		parts = append(parts, "country_code IN ("+strings.Join(holders, ",")+")")
+	}
+	return "(" + strings.Join(parts, " OR ") + ")", args
+}
+
+// escapeLike neutralizes the wildcards LIKE would otherwise read out of the
+// user's text: a search for "10.0.0.1_" should look for that literal string.
+func escapeLike(term string) string {
+	r := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
+	return r.Replace(term)
+}
+
 func (f NodeFilter) where() (string, []any) {
 	var clauses []string
 	var args []any
@@ -188,14 +267,18 @@ func (f NodeFilter) where() (string, []any) {
 		args = append(args, f.Status)
 	}
 	if f.Country != "" {
-		clauses = append(clauses, "(country = ? OR country_code = ?)")
-		args = append(args, f.Country, f.Country)
+		if code := domain.CountryCode(f.Country); code != "" {
+			clauses = append(clauses, "(country_code = ? OR country = ?)")
+			args = append(args, code, f.Country)
+		} else {
+			clauses = append(clauses, "(country = ? OR country_code = ?)")
+			args = append(args, f.Country, f.Country)
+		}
 	}
-	if f.Search != "" {
-		like := "%" + f.Search + "%"
-		clauses = append(clauses,
-			"(ip_address LIKE ? OR host_name LIKE ? OR country LIKE ? OR remote_host LIKE ? OR provider_identity LIKE ?)")
-		args = append(args, like, like, like, like, like)
+	for _, term := range searchTerms(f.Search) {
+		clause, termArgs := searchClause(term)
+		clauses = append(clauses, clause)
+		args = append(args, termArgs...)
 	}
 	if f.FavoriteOnly {
 		clauses = append(clauses, "EXISTS (SELECT 1 FROM favorites WHERE favorites.node_id = proxy_nodes.id)")
@@ -242,6 +325,41 @@ func (r *NodeRepository) CountNodes(ctx context.Context, f NodeFilter) (int64, e
 	return total, err
 }
 
+// CountryCounts groups the pool by country for the console's country picker.
+// The filter's Country and Search are dropped on purpose: the picker has to go
+// on offering every country the *other* filters allow, including the one
+// already picked, or choosing one would empty the list it was chosen from.
+func (r *NodeRepository) CountryCounts(ctx context.Context, f NodeFilter) ([]domain.CountryCount, error) {
+	f.Country, f.Search = "", ""
+	where, args := f.where()
+	query := `SELECT country_code, MIN(country), COUNT(*),
+		SUM(CASE WHEN status='ready' THEN 1 ELSE 0 END)
+		FROM proxy_nodes` + where + `
+		GROUP BY country_code ORDER BY COUNT(*) DESC, country_code ASC`
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []domain.CountryCount{}
+	for rows.Next() {
+		var code, country sql.NullString
+		var total, ready sql.NullInt64
+		if err := rows.Scan(&code, &country, &total, &ready); err != nil {
+			return nil, err
+		}
+		out = append(out, domain.CountryCount{
+			Code:        code.String,
+			Country:     country.String,
+			CountryZH:   domain.CountryChinese(code.String, country.String),
+			CountryFlag: domain.CountryFlag(code.String),
+			Total:       total.Int64,
+			Ready:       ready.Int64,
+		})
+	}
+	return out, rows.Err()
+}
+
 // Get returns one node by id (resolving aliases).
 func (r *NodeRepository) Get(ctx context.Context, id string) (domain.ProxyNodeRead, error) {
 	id = r.ResolveAlias(ctx, id)
@@ -281,43 +399,6 @@ func (r *NodeRepository) InsertDiscovered(ctx context.Context, n domain.Discover
 	return insertDiscovered(ctx, r.q, n)
 }
 
-// MarkAllAbsent flags every node as not present in the latest source snapshot.
-func (r *NodeRepository) MarkAllAbsent(ctx context.Context) error {
-	return r.q.MarkAllNodesAbsent(ctx)
-}
-
-// DeleteStaleAbsent removes nodes absent from the source since before cutoff.
-func (r *NodeRepository) DeleteStaleAbsent(ctx context.Context, cutoff time.Time) error {
-	return r.q.DeleteStaleAbsentNodes(ctx, sql.NullString{String: tstr(cutoff), Valid: true})
-}
-
-// ProbeOutcome carries the mutable fields updated after a probe.
-type ProbeOutcome struct {
-	Status              domain.NodeStatus
-	LatencyMS           int
-	ConsecutiveFailures int
-	SuccessCount        int
-	FailureCount        int
-	LastProbedAt        *time.Time
-	LastSuccessAt       *time.Time
-	CooldownUntil       *time.Time
-}
-
-// UpdateProbeOutcome persists the result of a probe against a node.
-func (r *NodeRepository) UpdateProbeOutcome(ctx context.Context, id string, o ProbeOutcome) error {
-	return r.q.UpdateNodeProbeOutcome(ctx, gen.UpdateNodeProbeOutcomeParams{
-		Status:              string(o.Status),
-		LatencyMs:           int64(o.LatencyMS),
-		ConsecutiveFailures: int64(o.ConsecutiveFailures),
-		SuccessCount:        int64(o.SuccessCount),
-		FailureCount:        int64(o.FailureCount),
-		LastProbedAt:        tptr(o.LastProbedAt),
-		LastSuccessAt:       tptr(o.LastSuccessAt),
-		CooldownUntil:       tptr(o.CooldownUntil),
-		ID:                  id,
-	})
-}
-
 // UpdateIPInfo persists IP classification for a node.
 func (r *NodeRepository) UpdateIPInfo(ctx context.Context, id string, info domain.IpInfo, at time.Time) error {
 	return r.q.UpdateNodeIPInfo(ctx, gen.UpdateNodeIPInfoParams{
@@ -337,14 +418,13 @@ func (r *NodeRepository) SetStatus(ctx context.Context, id string, status domain
 	return r.q.SetNodeStatus(ctx, gen.SetNodeStatusParams{Status: string(status), ID: id})
 }
 
-// Delete removes a node.
-func (r *NodeRepository) Delete(ctx context.Context, id string) error {
-	return r.q.DeleteNode(ctx, id)
-}
-
 // Statistics counts the whole pool. Every retained row is a node the liveness
 // sweep has not disproved, so there is no longer a subset to exclude: what the
 // dashboard counts and what the list shows are the same rows.
+//
+// Total and the per-status counts cover every row; the breakdowns the dashboard
+// shows next to them (ip type, country) are restricted to ready nodes, so a
+// tile that reads "residential" means residential *and usable right now*.
 func (r *NodeRepository) Statistics(ctx context.Context) (domain.PoolStatistics, error) {
 	var s domain.PoolStatistics
 	row := r.db.QueryRowContext(ctx, `SELECT
@@ -353,11 +433,11 @@ func (r *NodeRepository) Statistics(ctx context.Context) (domain.PoolStatistics,
 		SUM(CASE WHEN status='discovered' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN status='unavailable' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN status='cooldown' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN ip_type='residential' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN ip_type='mobile' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN ip_type='hosting' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN ip_type='unknown' THEN 1 ELSE 0 END),
-		COUNT(DISTINCT CASE WHEN country != '' THEN country END)
+		SUM(CASE WHEN status='ready' AND ip_type='residential' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN status='ready' AND ip_type='mobile' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN status='ready' AND ip_type='hosting' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN status='ready' AND ip_type='unknown' THEN 1 ELSE 0 END),
+		COUNT(DISTINCT CASE WHEN status='ready' AND country != '' THEN country END)
 		FROM proxy_nodes`)
 	var ready, disc, unavail, cool, res, mob, host, unk, countries sql.NullInt64
 	var total int64
@@ -426,11 +506,6 @@ func (r *SettingsRepository) SetConnectionEnabled(ctx context.Context, enabled b
 	return r.q.SetConnectionEnabled(ctx, b2i(enabled))
 }
 
-// SetFixedNode records the pinned node id (nil clears it).
-func (r *SettingsRepository) SetFixedNode(ctx context.Context, id *string) error {
-	return r.q.SetFixedNode(ctx, strToNS(id))
-}
-
 // ToggleFavorite flips membership and returns the updated favorite list.
 func (r *SettingsRepository) ToggleFavorite(ctx context.Context, nodeID string) ([]string, error) {
 	exists, err := r.q.IsFavorite(ctx, nodeID)
@@ -446,52 +521,6 @@ func (r *SettingsRepository) ToggleFavorite(ctx context.Context, nodeID string) 
 		return nil, err
 	}
 	return r.q.ListFavorites(ctx)
-}
-
-// BlacklistEntry mirrors a node_blacklist row in domain terms.
-type BlacklistEntry struct {
-	NodeID    string
-	Reason    string
-	MarkedAt  time.Time
-	ExpiresAt time.Time
-}
-
-// Blacklist marks a node unavailable until expiresAt.
-func (r *SettingsRepository) Blacklist(ctx context.Context, nodeID, reason string, markedAt, expiresAt time.Time) error {
-	return r.q.UpsertBlacklist(ctx, gen.UpsertBlacklistParams{
-		NodeID:    nodeID,
-		Reason:    reason,
-		MarkedAt:  tstr(markedAt),
-		ExpiresAt: tstr(expiresAt),
-	})
-}
-
-// RemoveBlacklist clears a blacklist entry.
-func (r *SettingsRepository) RemoveBlacklist(ctx context.Context, nodeID string) error {
-	return r.q.DeleteBlacklist(ctx, nodeID)
-}
-
-// PurgeExpiredBlacklist deletes entries whose cooldown has elapsed.
-func (r *SettingsRepository) PurgeExpiredBlacklist(ctx context.Context, now time.Time) error {
-	return r.q.DeleteExpiredBlacklist(ctx, tstr(now))
-}
-
-// ListBlacklist returns all current blacklist entries.
-func (r *SettingsRepository) ListBlacklist(ctx context.Context) ([]BlacklistEntry, error) {
-	rows, err := r.q.ListBlacklist(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]BlacklistEntry, 0, len(rows))
-	for _, b := range rows {
-		out = append(out, BlacklistEntry{
-			NodeID:    b.NodeID,
-			Reason:    b.Reason,
-			MarkedAt:  parseT(b.MarkedAt),
-			ExpiresAt: parseT(b.ExpiresAt),
-		})
-	}
-	return out, nil
 }
 
 // ---- JobRepository ----------------------------------------------------------

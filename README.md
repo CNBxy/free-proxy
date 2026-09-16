@@ -4,7 +4,9 @@
 
 > 在海外 Linux VPS 上运行安装脚本，从公开节点源（VPNGate）获取免费出口，完成连通性检测和延迟测试后选择可用线路，并提供 **SOCKS5 / HTTP 代理**。节点不可用时，服务会自动重连或切换。
 
-> 🎥 视频演示： [YouTube](https://youtu.be/0uf9St0cBM8)
+🎥 [免费住宅 IP 代理搭建教程｜VPS 一键部署 SOCKS5 / HTTP 代理 | FreeProxy](https://youtu.be/0uf9St0cBM8)
+
+🎥 [轻松白嫖100+住宅IP！Free-Proxy更新 + v2rayN前置代理实操教程](https://youtu.be/eTeM7bPE60Q)
 
 <p>
   <img alt="一键部署" src="https://img.shields.io/badge/部署-一行命令-brightgreen">
@@ -76,11 +78,13 @@ bash <(curl -Ls https://raw.githubusercontent.com/masteralanlab/free-proxy/main/
 
 ```text
 URL:       http://<你的服务器IP>:39527/xxxxxxxxxxxx/
+Path:      /xxxxxxxxxxxx/
 Username:  xxxxxxxx
 Password:  xxxxxxxx
 ```
 
-> 🔑 路径、账号、密码仅在**首次安装**时随机生成，没有任何默认值，请当场保存（密码事后无法找回）。
+> 🔑 路径、账号、密码仅在**首次安装**时随机生成，没有任何默认值。
+> 😌 **忘了也不用重置**：随时执行 `free-proxy credentials`，它会再次打印路径、用户名和密码，不重启服务、不断开当前隧道。
 > 🔒 后续重新运行安装进行更新时会保留原有路径、账号和密码。如需主动更换，可使用后台设置或执行 `free-proxy install --rotate-admin`。
 
 安装完成后，服务会在后台获取节点、测速并尝试建立连接。
@@ -106,7 +110,7 @@ http://你的服务器IP:39527/<你的安全路径>/
 为避免变成任何人可用的 **「开放代理」**,代理默认只服务本机。想从外网使用,两步:
 
 1. **设置代理凭据**:进入网页后台「策略 → 后台与代理服务」填写代理用户名和新密码。
-2. **后台开启**:勾选「允许代理端口外网访问」并保存。配置写入 SQLite,密码只保存 scrypt 哈希。
+2. **后台开启**:勾选「允许代理端口外网访问」并保存。配置写入 SQLite,代理密码只保存 scrypt 哈希(无法回读,忘记时在后台重新设置即可)。
 
 之后可在本机应用里使用 `socks5://用户名:密码@127.0.0.1:9527`，外部设备使用 `socks5://用户名:密码@你的服务器IP:9527`。
 
@@ -134,26 +138,58 @@ curl --proxy http://用户名:密码@127.0.0.1:9527   https://api.ipify.org
 2. 点 **「更新并检测节点」**,稍等它发现、测速并自动连上最快的节点。
 3. **「网关」** 面板可看到当前出口节点、延迟和出口 IP。
 4. 把本机应用的代理指向 `127.0.0.1:9527` 即可开始使用。
+5. **「系统」** 面板顶部是 **「版本更新」**:有新版本时标签页上会出现小圆点,面板里按 `新功能 / 问题修复 / 性能优化` 分类列出这次更新了什么,点 **「更新到 vX.Y.Z」** 即可完成升级,不用再 SSH 上去执行安装命令。
+
+---
+
+## 🔑 忘记管理路径 / 账号 / 密码?
+
+在服务器上执行下面这条命令，它会**把管理网址、管理路径、用户名和密码直接打印出来**——不重置密码、不重启服务、不断开当前隧道:
+
+```bash
+sudo free-proxy credentials
+```
+
+```text
+URL:      http://<你的服务器IP>:39527/<你的管理路径>/
+Path:     /<你的管理路径>/
+Username: <管理员用户名>
+Password: <管理员密码>
+```
+
+需要在脚本里使用时，加 `--json`:
+
+```bash
+sudo free-proxy credentials --json
+# {"url":"...","path":"/xxxx/","port":39527,"username":"xxxx","password":"xxxx"}
+```
+
+> 💡 密码与 scrypt 哈希一起保存在 `/var/lib/free-proxy/free-proxy.db`（文件权限 `0600`，仅 `root` 可读），所以该命令需要 `root` 权限。
+> ⬆️ **从旧版本升级过来的机器不用手动处理**:旧版本只存了密码哈希、读不回来,所以升级(重新执行一行命令安装)时会**自动重置一次密码并直接打印新密码**,管理路径和用户名保持不变。重置就发生在安装过程中,而安装本来就要重启服务,不会有额外中断;这一次之后密码就固定下来了,忘记时执行 `credentials` 查看即可。
 
 ---
 
 ## 🔧 常用命令
 
 ```bash
-free-proxy credentials   # 查看管理网址与账号密码
+free-proxy credentials   # 打印管理网址、管理路径、用户名和密码(忘记密码时用它)
 free-proxy status        # 查看配置和数据库状态
 free-proxy logs --lines 100  # 查看最近日志
+free-proxy admin-config --password '新密码'   # 修改后台密码
 free-proxy uninstall     # 卸载(加 --purge-data 连数据一起删除)
 ```
 
 所有子命令、参数、输出和使用示例见 **[命令行使用指南](docs/cli.md)**。
 
-**更新到最新版**:重新执行一次上面的「一行命令安装」即可。节点数据、设置、管理路径、账号和密码都会保留不变。
+**更新到最新版**:在网页后台 **「系统 → 版本更新」** 点一下按钮就行——它会显示当前版本、最新版本和这中间每个版本改了什么,然后自动下载官方二进制、校验 SHA256、替换程序并重启服务。也可以照旧重新执行一次上面的「一行命令安装」,两种方式效果相同。
+
+无论用哪种方式,节点数据、设置、管理路径、账号和密码都会保留不变(唯一的例外:从只保存密码哈希的旧版本升级到本版本时,密码会自动重置一次并在安装输出中打印,见上文)。更新过程中代理会中断十几秒,服务重启后需要重新登录后台。
 
 ---
 
 ## ❓ 常见问题
 
+- **忘记后台地址或账号密码?** 在服务器上执行 `sudo free-proxy credentials`,它会直接打印网址、路径、用户名和密码,不需要重置密码,也不会重启服务。
 - **连不上 / 暂时没有节点?** 免费节点(VPNGate)本身会波动,服务会自动重试与切换。多等一会,或在后台点一次「更新并检测节点」。
 - **提示需要 root / TUN?** 请用 root 运行，并确认 VPS 开启了 TUN/TAP。选择 **[搬瓦工](https://cutt.ly/qywJNWzd)** 或 **[DMIT](https://cutt.ly/YywJIzY0)** 时，也应以具体套餐的虚拟化架构和 TUN 支持情况为准。
 - **我的 VPS 是 ARM 架构?** 不用管,安装脚本会自动识别 amd64 / arm64。
@@ -195,24 +231,19 @@ chmod +x free-proxy && sudo ./free-proxy install
 
 ### 配置
 
-生产环境配置文件默认 `/etc/free-proxy/free-proxy.env`(由 `free-proxy install` 生成),只保留启动和机器相关配置。后台凭据、代理服务、节点发现、检测维护、DNS 与路由参数统一在网页后台管理并写入 SQLite。升级时旧环境变量和 `web-config.json` 会一次性迁移到数据库,随后移除旧文件和已迁移的环境项。
+生产环境配置文件默认 `/etc/free-proxy/free-proxy.env`(由 `free-proxy install` 生成),只保留数据目录和本机需要避让的网络命名(网卡名、探测网卡前缀、策略路由表号)。后台凭据、代理服务和端口在网页后台管理并写入 SQLite;检测维护、节点发现、DNS 与路由等调优参数则是程序内的常量,不在任何一处配置。升级时旧环境变量和 `web-config.json` 会一次性迁移到数据库,随后移除旧文件和已迁移的环境项。
 
 ```text
 FREE_PROXY_DATA_DIR=/var/lib/free-proxy
 FREE_PROXY_DATABASE_URL=
-FREE_PROXY_SQL_ECHO=false
 FREE_PROXY_ALLOW_PROCESS_RESTART=true
 FREE_PROXY_OPENVPN_COMMAND=openvpn
-FREE_PROXY_OPENVPN_USERNAME=vpn
-FREE_PROXY_OPENVPN_PASSWORD=vpn
 FREE_PROXY_TUNNEL_INTERFACE=fpx0
 FREE_PROXY_PROBE_DEVICE_PREFIX=fpx
-FREE_PROXY_TEST_TUN_START=1
-FREE_PROXY_TEST_TUN_END=64
 FREE_PROXY_POLICY_ROUTING_TABLE=9527
 ```
 
-> 网页默认端口 `39527`,代理默认端口 `9527`,监听固定绑定 `0.0.0.0`;端口、凭据和外网访问均在后台配置。外网访问开关即时生效,其余运行参数保存后服务自动重启。
+> 后台只配置十项:后台用户名、密码、管理路径、网页端口、网页外网访问;代理用户名、密码、端口、启用开关、代理外网访问。检测间隔、超时、并发、数据源等参数已固定为程序内常量。网页默认端口 `39527`,代理默认端口 `9527`,监听固定绑定 `0.0.0.0`;外网访问开关即时生效,其余保存后服务自动重启。
 
 ### 与 3x-ui 等其它面板共存
 
@@ -236,7 +267,7 @@ FREE_PROXY_POLICY_ROUTING_TABLE=9527
 
 > 网页端口 `39527` 与代理端口 `9527` 同样是共享资源。它们不与 3x-ui 的默认端口冲突,如遇占用可在后台修改。
 
-弱配置小鸡(如 1 核 / 1G)可在后台调低「探测并发数」「每次发现节点上限」「首次连接检测数」。
+探测并发、发现上限、检测间隔和各类超时不再是配置项,已作为常量固定在程序里,取值本身就按 1 核 / 1G 小鸡选定。
 
 ### API 摘要
 
@@ -259,7 +290,7 @@ GET    /api/v1/logs              GET  /api/v1/logs/export
 
 - **Go 1.23+**、Echo v5(Web/API)、sqlc + `modernc.org/sqlite`(纯 Go,无 CGO)、goose(内嵌迁移)、cobra(CLI)、log/slog。
 - 前端 **React 19 + Vite + Tailwind v4 + Zustand**,构建产物经 `//go:embed` 内嵌进二进制。
-- 密码 `scrypt` 哈希,随机安全路径 + 会话 Cookie 鉴权。
+- 密码 `scrypt` 哈希,随机安全路径 + 会话 Cookie 鉴权。后台密码另存一份可回读的副本(仅 `root` 可读的 `0600` 数据库文件)供 `free-proxy credentials` 打印,登录校验始终走哈希;代理密码只保存哈希。
 
 ### 从源码构建
 

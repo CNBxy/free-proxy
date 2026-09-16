@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "./api";
-import type { GatewayStatus, PoolStatistics, ProxySettings } from "./types";
+import type { GatewayStatus, PoolStatistics, ProxySettings, UpdateStatus } from "./types";
 import { GatewayPanel } from "./components/GatewayPanel";
 import { LogsPanel } from "./components/LogsPanel";
 import { NodesPanel } from "./components/NodesPanel";
@@ -26,6 +26,7 @@ export function App({ onLogout }: { onLogout: () => void }) {
   const [gateway, setGateway] = useState<GatewayStatus | null>(null);
   const [stats, setStats] = useState<PoolStatistics | null>(null);
   const [settings, setSettings] = useState<ProxySettings | null>(null);
+  const [updateReady, setUpdateReady] = useState(false);
   const refreshSequence = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -48,6 +49,18 @@ export function App({ onLogout }: { onLogout: () => void }) {
     const t = setInterval(refresh, 8000);
     return () => clearInterval(t);
   }, [refresh]);
+
+  // A new release is not something to look for; it is something to be told
+  // about. The check is cached on the server, so this costs nothing until the
+  // cache expires — half-hourly here, so a release published today is on the
+  // 系统 tab within the hour.
+  const noteUpdate = useCallback((s: UpdateStatus) => setUpdateReady(s.update_available), []);
+  useEffect(() => {
+    const check = () => api.updateStatus().then(noteUpdate, () => {});
+    check();
+    const t = setInterval(check, 30 * 60 * 1000);
+    return () => clearInterval(t);
+  }, [noteUpdate]);
 
   async function doLogout() {
     try {
@@ -76,9 +89,9 @@ export function App({ onLogout }: { onLogout: () => void }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
         <StatTile label="当前节点" value={stats?.total ?? "—"} />
         <StatTile label="当前可用" value={stats?.ready ?? "—"} />
-        <StatTile label="当前住宅" value={stats?.residential ?? "—"} />
-        <StatTile label="当前移动" value={stats?.mobile ?? "—"} />
-        <StatTile label="当前国家/地区" value={stats?.countries ?? "—"} />
+        <StatTile label="可用住宅" value={stats?.residential ?? "—"} />
+        <StatTile label="可用移动" value={stats?.mobile ?? "—"} />
+        <StatTile label="可用国家/地区" value={stats?.countries ?? "—"} />
         <StatTile label="黑名单" value={stats?.blacklisted ?? "—"} />
       </div>
 
@@ -89,6 +102,9 @@ export function App({ onLogout }: { onLogout: () => void }) {
               tab === t.id ? "text-ink border-ink" : "text-ink-3 border-transparent hover:text-ink"
             }`}>
             {t.id === "favorites" ? `${t.label} (${settings?.favorite_node_ids.length ?? 0})` : t.label}
+            {t.id === "system" && updateReady && (
+              <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-warn align-middle" title="有新版本可更新" />
+            )}
           </button>
         ))}
       </nav>
@@ -97,7 +113,7 @@ export function App({ onLogout }: { onLogout: () => void }) {
       {tab === "favorites" && <NodesPanel favoriteOnly settings={settings} onChanged={refresh} />}
       {tab === "gateway" && <GatewayPanel status={gateway} onChanged={refresh} />}
       {tab === "settings" && <SettingsPanel settings={settings} onChanged={refresh} />}
-      {tab === "system" && <SystemPanel />}
+      {tab === "system" && <SystemPanel onUpdateStatus={noteUpdate} />}
       {tab === "logs" && <LogsPanel />}
 
       <Toasts />

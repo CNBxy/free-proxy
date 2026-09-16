@@ -55,6 +55,35 @@ func TestHashVerifyRoundTrip(t *testing.T) {
 	}
 }
 
+// The cost parameters are read back out of the stored hash, so a corrupt or
+// tampered row gets to choose how much memory a login allocates. Every case
+// here passes scrypt's own validation — it only rejects r*p >= 1<<30 — and
+// would be served if VerifyPassword did not bound the sizes itself.
+func TestVerifyRejectsOversizedCostParameters(t *testing.T) {
+	// salt and digest are well-formed so the parameters are the only thing
+	// standing between the call and the allocation.
+	const tail = "$c2FsdHNhbHQ=$ZGlnZXN0ZGlnZXN0"
+	cases := map[string]string{
+		"N sizes the mixing buffer": "scrypt$67108864$8$1" + tail,      // 128*8*2^26 = 64 GiB
+		"p sizes the block buffer":  "scrypt$16384$1$536870911" + tail, // 128*1*p  = 64 GiB
+		"r multiplies both":         "scrypt$16384$65536$1" + tail,     // 128*65536*16384
+	}
+	for name, hash := range cases {
+		if VerifyPassword("anything", hash) {
+			t.Errorf("%s: verified instead of being rejected", name)
+		}
+	}
+
+	// The shipped parameters must still be accepted, or the bound is too tight.
+	live, err := HashPassword("Sup3rSecret!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !VerifyPassword("Sup3rSecret!", live) {
+		t.Fatal("the parameters this package writes were rejected by its own bound")
+	}
+}
+
 func TestRandomCredential(t *testing.T) {
 	for range 50 {
 		c := RandomCredential(12)
@@ -111,6 +140,123 @@ func TestAdminConfigPersistsAcrossReloads(t *testing.T) {
 	if !VerifyPassword("fixed-password", got.PasswordHash) {
 		t.Fatal("persisted password hash no longer verifies")
 	}
+}
+
+// The whole point of storing the password: an operator who forgot it must be
+// able to read it back later instead of rotating (which restarts the service).
+func TestGeneratedPasswordIsRecoverableAfterReload(t *testing.T) {
+	cfg, repos := testAdminEnv(t)
+	first, err := NewAdminConfigStore(cfg, repos.App)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := first.Config()
+	if created.Password == "" {
+		t.Fatal("first install did not store a recoverable password")
+	}
+	if !VerifyPassword(created.Password, created.PasswordHash) {
+		t.Fatal("stored password does not match the stored hash")
+	}
+
+	reloaded, err := NewAdminConfigStore(cfg, repos.App)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reloaded.Config().Password; got != created.Password {
+		t.Fatalf("password after reload = %q, want %q", got, created.Password)
+	}
+}
+
+// The upgrade path for a hash-only install: `install` resets the password once.
+// The management path and username must survive, or existing bookmarks break.
+func TestResetPasswordKeepsPathAndUsername(t *testing.T) {
+	cfg, repos := testAdminEnv(t)
+	admin, err := NewAdminConfigStore(cfg, repos.App)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := admin.Config()
+
+	after, password, err := admin.ResetPassword()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Username != before.Username || after.SecretPath != before.SecretPath {
+		t.Fatalf("reset changed identity: %+v -> %+v", before, after)
+	}
+	if password == before.Password || password == "" {
+		t.Fatalf("reset did not issue a new password: %q", password)
+	}
+	if !VerifyPassword(password, after.PasswordHash) {
+		t.Fatal("new password does not verify against the new hash")
+	}
+}
+
+// Installs created before the password was stored have a hash only. A password
+// still readable elsewhere — the one-time file, or FREE_PROXY_ADMIN_PASSWORD —
+// is adopted when it verifies against that hash, and ignored when it does not
+// (which means the password was changed since and the copy is stale).
+func TestHashOnlyInstallAdoptsAVerifyingPassword(t *testing.T) {
+	for _, tc := range []struct {
+		name, file, env, want string
+	}{
+		{name: "matching file is adopted", file: "old-password", want: "old-password"},
+		{name: "stale file is ignored", file: "some-other-password", want: ""},
+		{name: "matching env password is adopted", env: "old-password", want: "old-password"},
+		{name: "stale env password is ignored", env: "some-other-password", want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, repos := testAdminEnv(t)
+			cfg.AdminPassword = tc.env
+			if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			hash, err := HashPassword("old-password")
+			if err != nil {
+				t.Fatal(err)
+			}
+			settings, err := repos.App.Get(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			settings.Admin.Username, settings.Admin.PasswordHash, settings.Admin.SecretPath = "u", hash, "p"
+			if err := repos.App.UpdateAdmin(context.Background(), settings.Admin); err != nil {
+				t.Fatal(err)
+			}
+			bootstrapPath := filepath.Join(cfg.DataDir, "initial-admin-password")
+			if err := os.WriteFile(bootstrapPath, []byte(tc.file+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			admin, err := NewAdminConfigStore(cfg, repos.App)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := admin.Config().Password; got != tc.want {
+				t.Fatalf("recovered password = %q, want %q", got, tc.want)
+			}
+			if _, err := os.Stat(bootstrapPath); !os.IsNotExist(err) {
+				t.Fatal("initial-admin-password was not removed")
+			}
+		})
+	}
+}
+
+func testAdminEnv(t *testing.T) (*config.Config, *store.Repos) {
+	t.Helper()
+	cfg := &config.Config{
+		DataDir: filepath.Join(t.TempDir(), "data"),
+		WebHost: "0.0.0.0", WebPort: 39527,
+		ProxyHost: "0.0.0.0", ProxyPort: 9527,
+	}
+	db, err := store.Open("file:" + filepath.Join(t.TempDir(), "settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	return cfg, store.NewRepos(db)
 }
 
 func TestLegacyWebConfigMigratesToDatabaseAndIsRemoved(t *testing.T) {

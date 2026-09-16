@@ -72,7 +72,7 @@ func (m *Manager) Probe(ctx context.Context, configText, device string) domain.T
 	})
 	res, _ := m.runner.Start(ctx, StartParams{
 		Bin: args[0], Args: args[1:], ConfigPath: configPath, Device: device,
-		StartupTimeout: m.cfg.OpenVPNTestTimeout(), KeepAlive: false,
+		StartupTimeout: config.OpenVPNTestTimeout, KeepAlive: false,
 	})
 	return res
 }
@@ -99,7 +99,7 @@ func (m *Manager) Connect(ctx context.Context, nodeID, configText string) domain
 	})
 	res, managed := m.runner.Start(ctx, StartParams{
 		Bin: args[0], Args: args[1:], ConfigPath: configPath, Device: m.cfg.TunnelInterface,
-		StartupTimeout: m.cfg.OpenVPNConnectTimeout(), KeepAlive: true,
+		StartupTimeout: config.OpenVPNConnectTimeout, KeepAlive: true,
 	})
 	if res.Success && managed != nil {
 		managed.SetExitHandler(m.exitHandler)
@@ -137,10 +137,17 @@ func (m *Manager) SetExitHandler(h func(code int)) {
 }
 
 // ClearExitedProcess drops a reference to a process that already exited.
+//
+// Stop is what owns the cleanup that outlives the process — closing the output
+// pipe and removing the generated .ovpn file — and dropping the reference
+// without it leaked one file descriptor and one config file per unexpected
+// exit. That is precisely the path a flapping node takes, over and over. Stop is
+// safe here: the child has been reaped, so it signals nothing and only releases.
 func (m *Manager) ClearExitedProcess() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.active != nil && !m.active.Running() {
+		m.active.Stop()
 		m.active = nil
 		m.activeNodeID = ""
 	}
@@ -219,7 +226,7 @@ func (m *Manager) ensureAuthFile() error {
 	if err := m.cfg.EnsureDirectories(); err != nil {
 		return err
 	}
-	data := m.cfg.OpenVPNUsername + "\n" + m.cfg.OpenVPNPassword + "\n"
+	data := config.OpenVPNUsername + "\n" + config.OpenVPNPassword + "\n"
 	return os.WriteFile(m.authFile, []byte(data), 0o600)
 }
 

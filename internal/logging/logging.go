@@ -3,7 +3,7 @@
 package logging
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -27,6 +27,13 @@ type Store struct {
 	logsDir     string
 	mu          sync.Mutex
 	lastCleanup time.Time
+
+	// file is the append handle for day, kept open across writes. The write path
+	// runs once per log record — including every line OpenVPN prints — so the
+	// open/close pair it used to do per line was two syscalls of pure overhead
+	// under a lock every other writer needs.
+	file *os.File
+	day  string
 }
 
 // NewStore creates the logs directory and returns a Store.
@@ -48,25 +55,51 @@ func (s *Store) write(level, module, message string, t time.Time) {
 	if err != nil {
 		return
 	}
-	path := filepath.Join(s.logsDir, t.Local().Format("2006-01-02")+".json")
+	day := t.Local().Format("2006-01-02")
 	s.mu.Lock()
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err == nil {
+	if f := s.appendFile(day); f != nil {
 		_, _ = f.Write(append(line, '\n'))
-		_ = f.Close()
 	}
 	s.mu.Unlock()
 	s.cleanup(t)
 }
 
+// appendFile returns the open append handle for day, rotating to a new file when
+// the date rolls over. Callers must hold s.mu.
+func (s *Store) appendFile(day string) *os.File {
+	if s.file != nil && s.day == day {
+		return s.file
+	}
+	if s.file != nil {
+		_ = s.file.Close()
+		s.file, s.day = nil, ""
+	}
+	f, err := os.OpenFile(filepath.Join(s.logsDir, day+".json"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil
+	}
+	s.file, s.day = f, day
+	return f
+}
+
 // Read returns stored entries for a date (default today), filtered by level and
 // module substring, returning at most limit most-recent entries.
+//
+// The file is walked backwards from the end and the walk stops as soon as limit
+// matches are in hand, so the cost is set by limit rather than by the size of
+// the day's log. Reading it forwards meant materializing every entry in the file
+// only to discard all but the last few — and the dashboard polls this endpoint
+// every five seconds, against a file that a connected tunnel appends to
+// continuously.
 func (s *Store) Read(date, level, module string, limit int) []Entry {
 	if date == "" {
 		date = time.Now().Local().Format("2006-01-02")
 	}
 	if _, err := time.Parse("2006-01-02", date); err != nil {
 		return []Entry{}
+	}
+	if limit <= 0 {
+		limit = defaultReadLimit
 	}
 	path := filepath.Join(s.logsDir, date+".json")
 	s.mu.Lock()
@@ -76,26 +109,81 @@ func (s *Store) Read(date, level, module string, limit int) []Entry {
 		return []Entry{}
 	}
 	defer f.Close()
-	var out []Entry
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		var e Entry
-		if json.Unmarshal(sc.Bytes(), &e) != nil {
-			continue
-		}
+	info, err := f.Stat()
+	if err != nil {
+		return []Entry{}
+	}
+	keep := func(e Entry) bool {
 		if level != "" && !strings.EqualFold(e.Level, level) {
-			continue
+			return false
 		}
 		if module != "" && !strings.Contains(strings.ToLower(e.Module), strings.ToLower(module)) {
-			continue
+			return false
 		}
-		out = append(out, e)
+		return true
 	}
-	if limit > 0 && len(out) > limit {
-		out = out[len(out)-limit:]
+	return readTail(f, info.Size(), keep, limit)
+}
+
+const (
+	// defaultReadLimit bounds an unlimited request. Read has no unbounded mode:
+	// its whole purpose is to not hold a day of logs in memory at once.
+	defaultReadLimit = 5000
+
+	// tailChunk is how much of the file each backward step pulls in.
+	tailChunk = 64 * 1024
+)
+
+// readTail collects up to limit entries satisfying keep, scanning backwards from
+// the end of the file and returning them in chronological order.
+func readTail(f *os.File, size int64, keep func(Entry) bool, limit int) []Entry {
+	newestFirst := make([]Entry, 0, limit)
+	// pending holds bytes the scan has read but not yet resolved into complete
+	// lines: everything before the earliest newline seen so far.
+	var pending []byte
+	pos := size
+
+	decode := func(line []byte) {
+		var e Entry
+		if json.Unmarshal(line, &e) != nil {
+			return
+		}
+		if keep(e) {
+			newestFirst = append(newestFirst, e)
+		}
 	}
-	return out
+
+	for pos > 0 && len(newestFirst) < limit {
+		n := int64(tailChunk)
+		if n > pos {
+			n = pos
+		}
+		pos -= n
+		chunk := make([]byte, n)
+		if _, err := f.ReadAt(chunk, pos); err != nil {
+			break
+		}
+		pending = append(chunk, pending...)
+		for len(newestFirst) < limit {
+			i := bytes.LastIndexByte(pending, '\n')
+			if i < 0 {
+				// What is left has no newline before it, so it is either the
+				// first line of the file or a fragment continuing into the
+				// previous chunk. Either way it is not complete yet.
+				break
+			}
+			decode(pending[i+1:])
+			pending = pending[:i]
+		}
+	}
+	if pos == 0 && len(newestFirst) < limit && len(pending) > 0 {
+		decode(pending) // first line of the file, which has no newline before it
+	}
+
+	for i, j := 0, len(newestFirst)-1; i < j; i, j = i+1, j-1 {
+		newestFirst[i], newestFirst[j] = newestFirst[j], newestFirst[i]
+	}
+	return newestFirst
 }
 
 func (s *Store) cleanup(now time.Time) {

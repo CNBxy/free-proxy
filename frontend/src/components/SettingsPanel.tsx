@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import type { PolicyMode, ProxySettings, RoutingIpType } from "../types";
 import { useUI } from "../store";
-import { Card, Spinner } from "./ui";
+import { Card, Spinner, Toggle } from "./ui";
 import { SystemConfigPanel } from "./SystemConfigPanel";
 
 export function SettingsPanel({ settings, onChanged }: { settings: ProxySettings | null; onChanged: () => void }) {
@@ -86,9 +86,9 @@ export function SettingsPanel({ settings, onChanged }: { settings: ProxySettings
           </label>
           {form.routing_mode === "country" && (
             <label className="block">
-              <span className="text-sm text-ink-2">国家（英文名或代码）</span>
+              <span className="text-sm text-ink-2">国家（中文名、英文名或代码）</span>
               <input className="field mt-1" value={form.force_country}
-                onChange={(e) => set({ force_country: e.target.value })} placeholder="例如 Japan 或 JP" />
+                onChange={(e) => set({ force_country: e.target.value })} placeholder="例如 日本、Japan 或 JP" />
             </label>
           )}
           {form.routing_mode === "fixed" && (
@@ -98,11 +98,9 @@ export function SettingsPanel({ settings, onChanged }: { settings: ProxySettings
                 onChange={(e) => set({ fixed_node_id: e.target.value })} placeholder="节点 ID" />
             </label>
           )}
-          <label className="flex items-center gap-3 mt-2">
-            <input type="checkbox" checked={form.connection_enabled}
-              onChange={(e) => set({ connection_enabled: e.target.checked })} />
-            <span className="text-sm text-ink-2">启用自动连接出口</span>
-          </label>
+          <Toggle label="启用自动连接出口" hint="关闭后不会自动挑选并连接出口"
+            checked={form.connection_enabled}
+            onChange={(v) => set({ connection_enabled: v })} />
         </div>
         <p className="text-xs text-ink-3 mt-4">
           延迟优先选择响应最快的节点；速度优先选择来源标注带宽最高的节点；智能策略综合延迟（40%）、速度（40%）和 VPN Gate 会话数（20%，越少越好）。

@@ -31,6 +31,8 @@ type ProxyNodeRead struct {
 	ProviderIdentity    string            `json:"provider_identity"`
 	Country             string            `json:"country"`
 	CountryCode         string            `json:"country_code"`
+	CountryZH           string            `json:"country_zh"`
+	CountryFlag         string            `json:"country_flag"`
 	HostName            string            `json:"host_name"`
 	IPAddress           string            `json:"ip_address"`
 	RemoteHost          string            `json:"remote_host"`
@@ -65,6 +67,17 @@ type ProxyNodePage struct {
 	Total  int64           `json:"total"`
 	Limit  int             `json:"limit"`
 	Offset int             `json:"offset"`
+}
+
+// CountryCount is one entry of the console's country picker: how many nodes the
+// current filters leave in a country, and how many of those are usable now.
+type CountryCount struct {
+	Code        string `json:"code"`
+	Country     string `json:"country"`
+	CountryZH   string `json:"country_zh"`
+	CountryFlag string `json:"country_flag"`
+	Total       int64  `json:"total"`
+	Ready       int64  `json:"ready"`
 }
 
 type PoolStatistics struct {

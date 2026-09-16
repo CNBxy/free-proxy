@@ -4,7 +4,9 @@
 
 > 海外の格安 VPS 上で **1 行のコマンド** を実行するだけで、公開ノードソース(VPNGate)から数百の無料出口ノードを自動収集し、実際に速度を測定して最速の回線をスマートに選び、安定した **SOCKS5 / HTTP プロキシ** を提供します。ノードが切断されても自動で切り替わり、常に監視する必要はありません。
 
-> 🎥 デモ動画: [YouTube](https://youtu.be/0uf9St0cBM8)
+🎥 [無料の住宅 IP プロキシ構築チュートリアル｜VPS にワンコマンドで SOCKS5 / HTTP プロキシをデプロイ | FreeProxy](https://youtu.be/0uf9St0cBM8)
+
+🎥 [住宅 IP を 100 個以上無料で手軽に利用！Free-Proxy アップデート + v2rayN 前段プロキシ実践チュートリアル](https://youtu.be/eTeM7bPE60Q)
 
 <p>
   <img alt="ワンコマンドデプロイ" src="https://img.shields.io/badge/%E3%83%87%E3%83%97%E3%83%AD%E3%82%A4-1%E8%A1%8C%E3%83%9E%E3%83%B3%E3%83%89-brightgreen">
@@ -76,12 +78,14 @@ bash <(curl -Ls https://raw.githubusercontent.com/masteralanlab/free-proxy/main/
 初回インストールの完了時に、ランダム生成されたパス、アカウント、パスワードが**そのまま表示されます**:
 
 ```text
-URL:       http://<你的服务器IP>:39527/xxxxxxxxxxxx/
+URL:       http://<あなたのサーバーIP>:39527/xxxxxxxxxxxx/
+Path:      /xxxxxxxxxxxx/
 Username:  xxxxxxxx
 Password:  xxxxxxxx
 ```
 
-> 🔑 パス、アカウント、パスワードは**初回インストール時のみ**ランダム生成されます。パスワードは後から復元できないため、その場で保存してください。
+> 🔑 パス、アカウント、パスワードは**初回インストール時のみ**ランダム生成されます（既定値はありません）。
+> 😌 **忘れてもリセット不要**: いつでも `free-proxy credentials` を実行すれば、パス・ユーザー名・パスワードを再表示できます。サービスの再起動も、現在のトンネルの切断も発生しません。
 > 🔒 以後の更新では既存のパス、アカウント、パスワードが保持されます。明示的に変更する場合は管理画面または `free-proxy install --rotate-admin` を使用します。
 
 ✅ **完了!** サービスはすでにバックグラウンドで自動的にノード収集・速度測定・接続を行っています。続いて使い方を見ていきましょう。
@@ -134,21 +138,50 @@ VPS とは異なる IP が表示されれば、プロキシがすでに VPN 出�
 
 ---
 
+## 🔑 管理パス / アカウント / パスワードを忘れたら?
+
+サーバー上で次のコマンドを実行してください。**管理 URL・管理パス・ユーザー名・パスワードをそのまま表示**します。パスワードのリセットもサービスの再起動も行わず、現在のトンネルも切断しません:
+
+```bash
+sudo free-proxy credentials
+```
+
+```text
+URL:      http://<あなたのサーバーIP>:39527/<管理パス>/
+Path:     /<管理パス>/
+Username: <管理者ユーザー名>
+Password: <管理者パスワード>
+```
+
+スクリプトから使う場合は `--json` を付けます:
+
+```bash
+sudo free-proxy credentials --json
+# {"url":"...","path":"/xxxx/","port":39527,"username":"xxxx","password":"xxxx"}
+```
+
+> 💡 パスワードは scrypt ハッシュとともに `/var/lib/free-proxy/free-proxy.db`（パーミッション `0600`、`root` のみ読み取り可）に保存されます。そのため本コマンドは `root` 権限が必要です。
+> ⬆️ **旧バージョンからのアップグレードは手動対応不要**: 旧バージョンはパスワードのハッシュしか保存しておらず読み戻せないため、アップグレード（1 行のインストールコマンドの再実行）時に**パスワードを 1 回だけ自動リセットし、新しいパスワードをそのまま表示**します。管理パスとユーザー名は変わりません。リセットはインストール中に行われ、インストールでは元々サービスが再起動するため、追加の中断はありません。以後パスワードは固定され、忘れたときは `credentials` を実行するだけです。
+
+---
+
 ## 🔧 よく使うコマンド
 
 ```bash
-free-proxy credentials   # 查看管理网址与账号密码
-free-proxy status        # 查看运行状态
-free-proxy logs -n 100   # 查看最近日志
-free-proxy uninstall     # 卸载(加 --purge-data 连数据一起删除)
+free-proxy credentials   # 管理 URL・管理パス・ユーザー名・パスワードを表示(パスワードを忘れたとき)
+free-proxy status        # 設定とデータベースの状態を表示
+free-proxy logs --lines 100  # 直近のログを表示
+free-proxy admin-config --password '新しいパスワード'   # 管理パスワードを変更
+free-proxy uninstall     # アンインストール(--purge-data を付けるとデータも削除)
 ```
 
-**最新版へ更新**:上記の「1 行のコマンドでインストール」をもう一度実行するだけです。ノードデータ、設定、管理パス、アカウント、パスワードはすべて保持されます。
+**最新版へ更新**:上記の「1 行のコマンドでインストール」をもう一度実行するだけです。ノードデータ、設定、管理パス、アカウント、パスワードはすべて保持されます（唯一の例外: パスワードのハッシュしか保存していない旧バージョンからのアップグレード時は、パスワードが 1 回だけ自動リセットされ、インストール出力に表示されます。上記参照）。
 
 ---
 
 ## ❓ よくある質問
 
+- **管理画面のアドレスやアカウント・パスワードを忘れた?** サーバー上で `sudo free-proxy credentials` を実行すると、URL・パス・ユーザー名・パスワードがそのまま表示されます。パスワードのリセットもサービスの再起動も不要です。
 - **接続できない / 一時的にノードがない?** 無料ノード(VPNGate)自体に変動があり、サービスは自動で再試行と切り替えを行います。しばらく待つか、管理画面で「ノードを更新して検出」を一度クリックしてください。
 - **root / TUN が必要と表示される?** root で実行し、VPS で TUN/TAP が有効になっていることを確認してください。**[BandwagonHost（搬瓦工）](https://cutt.ly/qywJNWzd)** / **[DMIT](https://cutt.ly/YywJIzY0)** はいずれも KVM アーキテクチャで、デフォルトで対応しており、すぐに使えます。
 - **私の VPS は ARM アーキテクチャです?** 気にする必要はありません。インストールスクリプトが amd64 / arm64 を自動判別します。
@@ -190,7 +223,7 @@ chmod +x free-proxy && sudo ./free-proxy install
 free-proxy serve                 # 运行控制台 + 代理网关 + 后台任务
 free-proxy install               # 一键安装:二进制 + 依赖 + 环境文件 + 服务(需 root)
 free-proxy uninstall             # 卸载服务与二进制,--purge-data 同时删数据(需 root)
-free-proxy credentials           # 打印管理地址与一次性密码
+free-proxy credentials [--json]  # 管理 URL・パス・ユーザー名・パスワードを表示
 free-proxy discover              # 拉取并存储节点
 free-proxy status                # 打印配置与数据库表
 free-proxy preflight             # 启动前环境检查
@@ -208,23 +241,18 @@ free-proxy logs --lines 200      # 打印最近日志
 ```text
 FREE_PROXY_DATA_DIR=/var/lib/free-proxy
 FREE_PROXY_DATABASE_URL=
-FREE_PROXY_SQL_ECHO=false
 FREE_PROXY_ALLOW_PROCESS_RESTART=true
 FREE_PROXY_OPENVPN_COMMAND=openvpn
-FREE_PROXY_OPENVPN_USERNAME=vpn
-FREE_PROXY_OPENVPN_PASSWORD=vpn
 FREE_PROXY_TUNNEL_INTERFACE=fpx0
 FREE_PROXY_PROBE_DEVICE_PREFIX=fpx
-FREE_PROXY_TEST_TUN_START=1
-FREE_PROXY_TEST_TUN_END=64
 FREE_PROXY_POLICY_ROUTING_TABLE=9527
 ```
 
-> Web port, proxy port, credentials, discovery, maintenance, DNS, routing, and external-access options are managed in the dashboard and stored in SQLite.
+> The dashboard configures exactly ten things: admin username, password, management path, web port and external access; proxy username, password, port, enable switch and external access. Everything else — intervals, timeouts, concurrency, data sources — is a constant in the binary.
 
 低スペックの VPS(1 コア / 1G など)ではプローブ負荷を下げられます:
 
-Use the dashboard to lower probe concurrency, discovery limit, and initial test count.
+Tuning values — probe concurrency, discovery limit, check intervals, timeouts — are constants in the binary rather than settings, chosen to run on a 1-core / 1 GB box.
 
 ### API 概要
 
@@ -247,7 +275,7 @@ GET    /api/v1/logs              GET  /api/v1/logs/export
 
 - **Go 1.23+**、Echo v5(Web/API)、sqlc + `modernc.org/sqlite`(純 Go、CGO なし)、goose(内蔵マイグレーション)、cobra(CLI)、log/slog。
 - フロントエンドは **React 19 + Vite + Tailwind v4 + Zustand**、ビルド成果物は `//go:embed` でバイナリに内蔵。
-- パスワードは `scrypt` ハッシュ、ランダムなシークレットパス + セッション Cookie 認証。
+- パスワードは `scrypt` ハッシュ、ランダムなシークレットパス + セッション Cookie 認証。管理パスワードは `free-proxy credentials` で表示できるよう、`root` のみ読み取り可能な `0600` のデータベースに読み取り可能な形でも保存されます（ログイン検証は常にハッシュを使用）。プロキシのパスワードはハッシュのみ保存します。
 
 ### ソースからビルド
 

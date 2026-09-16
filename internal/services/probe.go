@@ -30,7 +30,6 @@ const (
 
 // ProbeService dials nodes to test connectivity and measure latency.
 type ProbeService struct {
-	cfg         *config.Config
 	nodes       *store.NodeRepository
 	tunnel      *tunnel.Manager
 	tunAlloc    *netx.TunAllocator
@@ -45,41 +44,54 @@ type ProbeService struct {
 }
 
 // NewProbeService constructs a ProbeService.
-func NewProbeService(cfg *config.Config, nodes *store.NodeRepository, mgr *tunnel.Manager, tunAlloc *netx.TunAllocator,
+func NewProbeService(nodes *store.NodeRepository, mgr *tunnel.Manager, tunAlloc *netx.TunAllocator,
 	runner netx.CommandRunner, ipInfo *IpInfoService, history *store.ProbeResultRepository, coordinator *Coordinator) *ProbeService {
-	n := cfg.MaxProbeConcurrency
-	if n < 1 {
-		n = 1
-	}
+	// The floor this used to keep is gone with the setting that could underrun
+	// it: MaxProbeConcurrency is a constant now, so a zero-width semaphore is a
+	// compile-time-visible mistake rather than something an operator can type.
 	return &ProbeService{
-		cfg: cfg, nodes: nodes, tunnel: mgr, tunAlloc: tunAlloc, runner: runner,
-		ipInfo: ipInfo, history: history, coordinator: coordinator, sem: make(chan struct{}, n),
-		presem: make(chan struct{}, tcpPrecheckConcurrency),
+		nodes: nodes, tunnel: mgr, tunAlloc: tunAlloc, runner: runner,
+		ipInfo: ipInfo, history: history, coordinator: coordinator,
+		sem: make(chan struct{}, config.MaxProbeConcurrency),
+    presem: make(chan struct{}, tcpPrecheckConcurrency),
 		dial:   dialTCP,
 	}
 }
 
 // Probe tests a single node, updating its state and (optionally) enriching IP info.
 func (s *ProbeService) Probe(ctx context.Context, nodeID string, enrich bool) (domain.ProbeResult, error) {
-	target, err := s.nodes.GetTarget(ctx, nodeID)
-	if err != nil {
-		return domain.ProbeResult{}, err
-	}
-	_ = s.nodes.MarkProbing(ctx, nodeID)
-
-	if s.unreachableOverTCP(ctx, target) {
-		return s.recordUnreachable(ctx, nodeID), nil
-	}
-
+  if s.unreachableOverTCP(ctx, target) {
+    return s.recordUnreachable(ctx, nodeID), nil
+  }
 	var latency int
 	var tun domain.TunnelStartResult
-	func() {
-		s.sem <- struct{}{}
+	var ipAddress string
+
+	err := func() error {
+		// The semaphore covers everything, not just the OpenVPN dial. ProbeMany
+		// starts one goroutine per node, so whatever sits above this line runs at
+		// the full width of the batch — and that used to include loading the
+		// node's target, whose config text is a few KB apiece, and a MarkProbing
+		// write that SQLite serializes anyway. A 200-node cycle held 200 configs
+		// in memory to keep five probes busy.
+		select {
+		case s.sem <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 		defer func() { <-s.sem }()
+
+		target, err := s.nodes.GetTarget(ctx, nodeID)
+		if err != nil {
+			return err
+		}
+		ipAddress = target.IPAddress
+		_ = s.nodes.MarkProbing(ctx, nodeID)
+
 		device, release, allocErr := s.tunAlloc.Allocate()
 		if allocErr != nil {
 			tun = failureResult(allocErr)
-			return
+			return nil
 		}
 		defer release()
 		var wg sync.WaitGroup
@@ -93,7 +105,11 @@ func (s *ProbeService) Probe(ctx context.Context, nodeID string, enrich bool) (d
 			tun = s.tunnel.Probe(ctx, target.ConfigText, device)
 		}()
 		wg.Wait()
+		return nil
 	}()
+	if err != nil {
+		return domain.ProbeResult{}, err
+	}
 
 	probedAt := time.Now().UTC()
 	result := domain.ProbeResult{
@@ -101,7 +117,7 @@ func (s *ProbeService) Probe(ctx context.Context, nodeID string, enrich bool) (d
 	}
 	s.recordResult(ctx, nodeID, result)
 	if enrich && result.Available && s.ipInfo != nil {
-		_ = s.ipInfo.Enrich(ctx, nodeID, target.IPAddress)
+		_ = s.ipInfo.Enrich(ctx, nodeID, ipAddress)
 	}
 	return result, nil
 }

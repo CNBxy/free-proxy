@@ -19,30 +19,17 @@ export interface AccessConfig {
   proxy_auth_configured: boolean;
 }
 
+// Identity and reachability — the whole of what the console configures. Tuning
+// values (intervals, timeouts, concurrency, data sources) are constants in the
+// Go binary and never travel over this API.
 export interface AppSettings {
   admin: {
-    username: string; secret_path: string; session_ttl_seconds: number; web_port: number;
+    username: string; secret_path: string; web_port: number;
     web_external_access: boolean; password_set: boolean;
   };
   proxy: {
     enabled: boolean; port: number; username: string; external_access: boolean;
-    max_connections: number; connect_timeout_seconds: number; idle_timeout_seconds: number;
-    dns_server: string; password_set: boolean;
-  };
-  discovery: {
-    vpngate_api_url: string; discovery_limit: number; request_timeout_seconds: number;
-    ip_info_api_url: string; ip_info_cache_seconds: number;
-  };
-  maintenance: {
-    enabled: boolean; maintenance_interval_seconds: number; health_check_interval_seconds: number;
-    active_ping_interval_seconds: number; disconnected_retry_seconds: number;
-    max_probe_concurrency: number; initial_connect_test_limit: number; manual_test_node_limit: number;
-    openvpn_test_timeout_seconds: number; openvpn_connect_timeout_seconds: number;
-    invalid_backoff_seconds: number; stale_node_grace_seconds: number;
-  };
-  network: {
-    dns_repair_enabled: boolean; dns_repair_servers: string; routing_setup_retries: number;
-    routing_retry_interval_seconds: number; routing_strict_rp_filter: boolean;
+    password_set: boolean;
   };
 }
 
@@ -51,6 +38,8 @@ export interface ProxyNode {
   provider: string;
   country: string;
   country_code: string;
+  country_zh: string;
+  country_flag: string;
   host_name: string;
   ip_address: string;
   remote_host: string;
@@ -71,6 +60,15 @@ export interface ProxyNode {
   source_present: boolean;
   last_probed_at: string | null;
   last_success_at: string | null;
+}
+
+export interface CountryFacet {
+  code: string;
+  country: string;
+  country_zh: string;
+  country_flag: string;
+  total: number;
+  ready: number;
 }
 
 export interface ProxyNodePage {
@@ -148,6 +146,35 @@ export interface SystemStatus {
   listeners: Record<string, string>;
   monitors: Record<string, boolean>;
   monitor_details: Record<string, Record<string, unknown>>;
+}
+
+// One group of changes in a release ("新功能", "问题修复", ...). The server
+// builds these from the release notes, so the console only renders them.
+export interface ReleaseSection {
+  title: string;
+  items: string[];
+}
+
+export interface ReleaseNotes {
+  version: string;
+  published_at: string;
+  url: string;
+  sections: ReleaseSection[] | null;
+}
+
+export interface UpdateStatus {
+  current_version: string;
+  latest_version: string;
+  update_available: boolean;
+  // Every release between the installed version and the newest one, newest
+  // first — an update installs the newest and brings all of them.
+  pending: ReleaseNotes[] | null;
+  supported: boolean;
+  unsupported_reason: string;
+  updating: boolean;
+  checked_at: string;
+  releases_url: string;
+  last_log: string;
 }
 
 export interface LogEntry {

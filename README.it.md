@@ -4,7 +4,9 @@
 
 > Esegui **un solo comando** su un piccolo VPS all'estero: recupererà automaticamente centinaia di uscite gratuite da fonti pubbliche di nodi (VPNGate), con test di velocità reali e selezione intelligente della linea più veloce, offrendo verso l'esterno un **proxy SOCKS5 / HTTP** stabile. Quando un nodo cade, passa automaticamente a un altro, senza che tu debba mai stare a controllare.
 
-> 🎥 Video dimostrativo: [YouTube](https://youtu.be/0uf9St0cBM8)
+🎥 [Tutorial per creare un proxy gratuito con IP residenziale | Distribuisci un proxy SOCKS5 / HTTP su VPS con un solo comando | FreeProxy](https://youtu.be/0uf9St0cBM8)
+
+🎥 [Più di 100 IP residenziali gratis in modo semplice! Aggiornamento di Free-Proxy + guida pratica al proxy upstream di v2rayN](https://youtu.be/eTeM7bPE60Q)
 
 <p>
   <img alt="Distribuzione con un comando" src="https://img.shields.io/badge/Distribuzione-un%20comando-brightgreen">
@@ -76,12 +78,14 @@ Lo script eseguirà automaticamente: download del programma per l'architettura c
 Dopo la prima installazione, lo script **stampa direttamente** il percorso, il nome utente e la password generati casualmente:
 
 ```text
-URL:       http://<你的服务器IP>:39527/xxxxxxxxxxxx/
+URL:       http://<ip-del-tuo-server>:39527/xxxxxxxxxxxx/
+Path:      /xxxxxxxxxxxx/
 Username:  xxxxxxxx
 Password:  xxxxxxxx
 ```
 
-> 🔑 Percorso, nome utente e password vengono generati casualmente solo alla **prima installazione**. Salvali subito perché la password non è recuperabile in seguito.
+> 🔑 Percorso, nome utente e password vengono generati casualmente solo alla **prima installazione**; non esistono valori predefiniti.
+> 😌 **Li hai dimenticati? Non serve reimpostare nulla**: esegui `free-proxy credentials` quando vuoi e ristamperà percorso, nome utente e password, senza riavviare il servizio né interrompere il tunnel attivo.
 > 🔒 Gli aggiornamenti successivi mantengono invariati percorso, nome utente e password. Per cambiarli esplicitamente, usa il pannello o esegui `free-proxy install --rotate-admin`.
 
 ✅ **Fatto!** Il servizio sta già recuperando nodi, testando la velocità e connettendosi automaticamente in background. Ora vediamo come usarlo.
@@ -134,21 +138,50 @@ Se vedi un IP diverso da quello del tuo VPS, significa che il proxy sta già ino
 
 ---
 
+## 🔑 Hai dimenticato percorso di amministrazione / nome utente / password?
+
+Esegui questo comando sul server: **stampa direttamente indirizzo di amministrazione, percorso, nome utente e password**, senza reimpostare nulla, senza riavviare il servizio e senza interrompere il tunnel attivo:
+
+```bash
+sudo free-proxy credentials
+```
+
+```text
+URL:      http://<ip-del-tuo-server>:39527/<tuo-percorso-di-amministrazione>/
+Path:     /<tuo-percorso-di-amministrazione>/
+Username: <nome-utente-amministratore>
+Password: <password-amministratore>
+```
+
+Aggiungi `--json` se ti serve in uno script:
+
+```bash
+sudo free-proxy credentials --json
+# {"url":"...","path":"/xxxx/","port":39527,"username":"xxxx","password":"xxxx"}
+```
+
+> 💡 La password è salvata insieme al suo hash scrypt in `/var/lib/free-proxy/free-proxy.db` (permessi `0600`, leggibile solo da `root`): per questo il comando richiede `root`.
+> ⬆️ **Se aggiorni da una versione precedente non devi fare nulla a mano**: le versioni vecchie salvavano solo l'hash della password, che non è leggibile, quindi l'aggiornamento (rieseguendo il comando di installazione) **reimposta la password una sola volta e stampa quella nuova**, lasciando invariati percorso di amministrazione e nome utente. La reimpostazione avviene durante l'installazione, che riavvia comunque il servizio: nessuna interruzione aggiuntiva. Da lì in poi la password resta la stessa: se la dimentichi ti basta eseguire `credentials`.
+
+---
+
 ## 🔧 Comandi comuni
 
 ```bash
-free-proxy credentials   # 查看管理网址与账号密码
-free-proxy status        # 查看运行状态
-free-proxy logs -n 100   # 查看最近日志
-free-proxy uninstall     # 卸载(加 --purge-data 连数据一起删除)
+free-proxy credentials   # Stampa indirizzo, percorso, nome utente e password (quando li dimentichi)
+free-proxy status        # Mostra configurazione e stato del database
+free-proxy logs --lines 100  # Mostra i log recenti
+free-proxy admin-config --password 'NUOVA_PASSWORD'   # Cambia la password di amministrazione
+free-proxy uninstall     # Disinstalla (con --purge-data elimina anche i dati)
 ```
 
-**Aggiornare all'ultima versione**: basta rieseguire il comando di installazione. Dati, impostazioni, percorso di amministrazione, nome utente e password restano invariati.
+**Aggiornare all'ultima versione**: basta rieseguire il comando di installazione. Dati, impostazioni, percorso di amministrazione, nome utente e password restano invariati, con un'unica eccezione: aggiornando da una versione che salvava solo l'hash, la password viene reimpostata una volta e stampata nell'output dell'installazione (vedi sopra).
 
 ---
 
 ## ❓ Domande frequenti
 
+- **Hai dimenticato l'indirizzo del pannello o le credenziali?** Esegui `sudo free-proxy credentials` sul server: stampa direttamente URL, percorso, nome utente e password, senza reimpostare la password né riavviare il servizio.
 - **Non riesci a connetterti / nessun nodo al momento?** I nodi gratuiti (VPNGate) sono per natura instabili; il servizio riprova e cambia automaticamente. Attendi ancora un po', oppure clicca una volta su "Aggiorna e verifica i nodi" nel pannello.
 - **Ti viene richiesto root / TUN?** Esegui come root e verifica che il VPS abbia TUN/TAP abilitato. **[BandwagonHost](https://cutt.ly/qywJNWzd)** / **[DMIT](https://cutt.ly/YywJIzY0)** usano entrambi architettura KVM, la supportano di default e sono pronti all'uso.
 - **Il mio VPS è di architettura ARM?** Non preoccuparti, lo script di installazione riconosce automaticamente amd64 / arm64.
@@ -190,7 +223,7 @@ chmod +x free-proxy && sudo ./free-proxy install
 free-proxy serve                 # 运行控制台 + 代理网关 + 后台任务
 free-proxy install               # 一键安装:二进制 + 依赖 + 环境文件 + 服务(需 root)
 free-proxy uninstall             # 卸载服务与二进制,--purge-data 同时删数据(需 root)
-free-proxy credentials           # 打印管理地址与一次性密码
+free-proxy credentials [--json]  # Stampa indirizzo, percorso, nome utente e password
 free-proxy discover              # 拉取并存储节点
 free-proxy status                # 打印配置与数据库表
 free-proxy preflight             # 启动前环境检查
@@ -208,23 +241,18 @@ Il file di configurazione per l'ambiente di produzione è `/etc/free-proxy/free-
 ```text
 FREE_PROXY_DATA_DIR=/var/lib/free-proxy
 FREE_PROXY_DATABASE_URL=
-FREE_PROXY_SQL_ECHO=false
 FREE_PROXY_ALLOW_PROCESS_RESTART=true
 FREE_PROXY_OPENVPN_COMMAND=openvpn
-FREE_PROXY_OPENVPN_USERNAME=vpn
-FREE_PROXY_OPENVPN_PASSWORD=vpn
 FREE_PROXY_TUNNEL_INTERFACE=fpx0
 FREE_PROXY_PROBE_DEVICE_PREFIX=fpx
-FREE_PROXY_TEST_TUN_START=1
-FREE_PROXY_TEST_TUN_END=64
 FREE_PROXY_POLICY_ROUTING_TABLE=9527
 ```
 
-> Web port, proxy port, credentials, discovery, maintenance, DNS, routing, and external-access options are managed in the dashboard and stored in SQLite.
+> The dashboard configures exactly ten things: admin username, password, management path, web port and external access; proxy username, password, port, enable switch and external access. Everything else — intervals, timeouts, concurrency, data sources — is a constant in the binary.
 
 Su VPS a bassa potenza (es. 1 core / 1 GB) puoi ridurre il carico di probing:
 
-Use the dashboard to lower probe concurrency, discovery limit, and initial test count.
+Tuning values — probe concurrency, discovery limit, check intervals, timeouts — are constants in the binary rather than settings, chosen to run on a 1-core / 1 GB box.
 
 ### Riepilogo delle API
 
@@ -247,7 +275,7 @@ GET    /api/v1/logs              GET  /api/v1/logs/export
 
 - **Go 1.23+**, Echo v5 (Web/API), sqlc + `modernc.org/sqlite` (puro Go, senza CGO), goose (migrazioni integrate), cobra (CLI), log/slog.
 - Frontend **React 19 + Vite + Tailwind v4 + Zustand**, con gli artefatti di build integrati nel binario tramite `//go:embed`.
-- Password con hash `scrypt`, autenticazione tramite percorso sicuro casuale + cookie di sessione.
+- Password con hash `scrypt`, autenticazione tramite percorso sicuro casuale + cookie di sessione. La password di amministrazione è conservata anche in forma leggibile nel database `0600` accessibile solo a `root`, così che `free-proxy credentials` possa stamparla (il login verifica sempre l'hash); la password del proxy è salvata solo come hash.
 
 ### Build dal sorgente
 

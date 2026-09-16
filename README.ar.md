@@ -4,7 +4,9 @@
 
 > شغّل **أمرًا واحدًا** على خادم صغير خارج بلدك، فيقوم تلقائيًا بسحب المئات من المنافذ المجانية من مصادر العقد العامة (VPNGate)، ويقيس السرعة الفعلية، ويختار بذكاء أسرع خط، ليوفّر لك بروكسي **SOCKS5 / HTTP** ثابتًا. عند انقطاع أي عقدة يتم التبديل تلقائيًا، دون حاجة إلى مراقبتك المستمرة.
 
-> 🎥 فيديو توضيحي: [YouTube](https://youtu.be/0uf9St0cBM8)
+🎥 [دليل إعداد بروكسي مجاني بعنوان IP سكني | نشر بروكسي SOCKS5 / HTTP على خادم VPS بأمر واحد | FreeProxy](https://youtu.be/0uf9St0cBM8)
+
+🎥 [احصل بسهولة على أكثر من 100 عنوان IP سكني مجانًا! تحديث Free-Proxy + دليل عملي لإعداد بروكسي أمامي في v2rayN](https://youtu.be/eTeM7bPE60Q)
 
 <p>
   <img alt="النشر بأمر واحد" src="https://img.shields.io/badge/%D8%A7%D9%84%D9%86%D8%B4%D8%B1-%D8%A3%D9%85%D8%B1%20%D9%88%D8%A7%D8%AD%D8%AF-brightgreen">
@@ -76,12 +78,14 @@ bash <(curl -Ls https://raw.githubusercontent.com/masteralanlab/free-proxy/main/
 بعد التثبيت الأول، سيقوم السكربت **مباشرة بطباعة** المسار واسم المستخدم وكلمة المرور المولّدة عشوائيًا:
 
 ```text
-URL:       http://<你的服务器IP>:39527/xxxxxxxxxxxx/
+URL:       http://<عنوان-خادمك>:39527/xxxxxxxxxxxx/
+Path:      /xxxxxxxxxxxx/
 Username:  xxxxxxxx
 Password:  xxxxxxxx
 ```
 
-> 🔑 يتم توليد المسار واسم المستخدم وكلمة المرور عشوائيًا عند **التثبيت الأول فقط**. احفظها فورًا لأن كلمة المرور لا يمكن استرجاعها لاحقًا.
+> 🔑 يتم توليد المسار واسم المستخدم وكلمة المرور عشوائيًا عند **التثبيت الأول فقط**، ولا توجد قيم افتراضية.
+> 😌 **نسيتها؟ لا حاجة لإعادة التعيين**: نفّذ `free-proxy credentials` في أي وقت لتُطبع من جديد المسار واسم المستخدم وكلمة المرور، دون إعادة تشغيل الخدمة ودون قطع النفق الحالي.
 > 🔒 تحتفظ التحديثات اللاحقة بالمسار واسم المستخدم وكلمة المرور. لتغييرها صراحةً استخدم لوحة الإدارة أو `free-proxy install --rotate-admin`.
 
 ✅ **تم!** الخدمة تعمل الآن في الخلفية وتقوم تلقائيًا بسحب العقد وقياس السرعة والاتصال. لننتقل الآن إلى كيفية الاستخدام.
@@ -134,21 +138,50 @@ curl --proxy http://127.0.0.1:9527   https://api.ipify.org
 
 ---
 
+## 🔑 نسيت مسار الإدارة أو اسم المستخدم أو كلمة المرور؟
+
+نفّذ هذا الأمر على الخادم، فهو **يطبع مباشرة عنوان الإدارة والمسار واسم المستخدم وكلمة المرور** دون إعادة تعيين أي شيء، ودون إعادة تشغيل الخدمة، ودون قطع النفق الحالي:
+
+```bash
+sudo free-proxy credentials
+```
+
+```text
+URL:      http://<عنوان-خادمك>:39527/<مسار-الإدارة>/
+Path:     /<مسار-الإدارة>/
+Username: <اسم-المستخدم>
+Password: <كلمة-المرور>
+```
+
+أضف `--json` عند الحاجة إليه داخل سكربت:
+
+```bash
+sudo free-proxy credentials --json
+# {"url":"...","path":"/xxxx/","port":39527,"username":"xxxx","password":"xxxx"}
+```
+
+> 💡 تُحفظ كلمة المرور بجانب بصمة scrypt الخاصة بها في `/var/lib/free-proxy/free-proxy.db` (صلاحيات الملف `0600`، يقرأها `root` فقط)، لذلك يحتاج هذا الأمر إلى صلاحية `root`.
+> ⬆️ **الترقية من إصدار قديم لا تحتاج أي إجراء يدوي**: الإصدارات القديمة كانت تحفظ بصمة كلمة المرور فقط ولا يمكن قراءتها، لذلك تقوم الترقية (إعادة تنفيذ أمر التثبيت من سطر واحد) **بإعادة تعيين كلمة المرور مرة واحدة وطباعة الجديدة مباشرة**، مع الإبقاء على مسار الإدارة واسم المستخدم كما هما. تحدث إعادة التعيين أثناء التثبيت الذي يعيد تشغيل الخدمة أصلًا، فلا يوجد انقطاع إضافي. بعد ذلك تبقى كلمة المرور ثابتة، وعند نسيانها يكفي تنفيذ `credentials`.
+
+---
+
 ## 🔧 الأوامر الشائعة
 
 ```bash
-free-proxy credentials   # 查看管理网址与账号密码
-free-proxy status        # 查看运行状态
-free-proxy logs -n 100   # 查看最近日志
-free-proxy uninstall     # 卸载(加 --purge-data 连数据一起删除)
+free-proxy credentials   # طباعة العنوان والمسار واسم المستخدم وكلمة المرور (عند نسيانها)
+free-proxy status        # عرض الإعدادات وحالة قاعدة البيانات
+free-proxy logs --lines 100  # عرض أحدث السجلات
+free-proxy admin-config --password 'كلمة_المرور_الجديدة'   # تغيير كلمة مرور الإدارة
+free-proxy uninstall     # إزالة التثبيت (أضف --purge-data لحذف البيانات أيضًا)
 ```
 
-**التحديث إلى أحدث إصدار**: أعد تنفيذ أمر التثبيت أعلاه. سيتم الاحتفاظ ببيانات العقد والإعدادات ومسار الإدارة واسم المستخدم وكلمة المرور دون تغيير.
+**التحديث إلى أحدث إصدار**: أعد تنفيذ أمر التثبيت أعلاه. سيتم الاحتفاظ ببيانات العقد والإعدادات ومسار الإدارة واسم المستخدم وكلمة المرور دون تغيير، باستثناء حالة واحدة: عند الترقية من إصدار كان يحفظ بصمة كلمة المرور فقط، تُعاد تعيين كلمة المرور مرة واحدة وتُطبع في مخرجات التثبيت (انظر أعلاه).
 
 ---
 
 ## ❓ الأسئلة الشائعة
 
+- **نسيت عنوان اللوحة أو بيانات الدخول؟** نفّذ `sudo free-proxy credentials` على الخادم: يطبع مباشرة العنوان والمسار واسم المستخدم وكلمة المرور، دون إعادة تعيين كلمة المرور ودون إعادة تشغيل الخدمة.
 - **لا يتصل / لا توجد عقد مؤقتًا؟** العقد المجانية (VPNGate) نفسها متذبذبة، وستقوم الخدمة بإعادة المحاولة والتبديل تلقائيًا. انتظر قليلًا، أو انقر مرة على «تحديث وفحص العقد» من اللوحة.
 - **يظهر أنه يتطلب root / TUN؟** شغّله بصلاحية root، وتأكد من أن خادم VPS قد فعّل TUN/TAP. كل من **[BandwagonHost](https://cutt.ly/qywJNWzd)** / **[DMIT](https://cutt.ly/YywJIzY0)** بمعمارية KVM، ويدعمها افتراضيًا وجاهز للاستخدام مباشرة.
 - **خادم VPS الخاص بي بمعمارية ARM؟** لا تقلق، فسكربت التثبيت يتعرف تلقائيًا على amd64 / arm64.
@@ -190,7 +223,7 @@ chmod +x free-proxy && sudo ./free-proxy install
 free-proxy serve                 # 运行控制台 + 代理网关 + 后台任务
 free-proxy install               # 一键安装:二进制 + 依赖 + 环境文件 + 服务(需 root)
 free-proxy uninstall             # 卸载服务与二进制,--purge-data 同时删数据(需 root)
-free-proxy credentials           # 打印管理地址与一次性密码
+free-proxy credentials [--json]  # طباعة عنوان الإدارة والمسار واسم المستخدم وكلمة المرور
 free-proxy discover              # 拉取并存储节点
 free-proxy status                # 打印配置与数据库表
 free-proxy preflight             # 启动前环境检查
@@ -208,23 +241,18 @@ free-proxy logs --lines 200      # 打印最近日志
 ```text
 FREE_PROXY_DATA_DIR=/var/lib/free-proxy
 FREE_PROXY_DATABASE_URL=
-FREE_PROXY_SQL_ECHO=false
 FREE_PROXY_ALLOW_PROCESS_RESTART=true
 FREE_PROXY_OPENVPN_COMMAND=openvpn
-FREE_PROXY_OPENVPN_USERNAME=vpn
-FREE_PROXY_OPENVPN_PASSWORD=vpn
 FREE_PROXY_TUNNEL_INTERFACE=fpx0
 FREE_PROXY_PROBE_DEVICE_PREFIX=fpx
-FREE_PROXY_TEST_TUN_START=1
-FREE_PROXY_TEST_TUN_END=64
 FREE_PROXY_POLICY_ROUTING_TABLE=9527
 ```
 
-> Web port, proxy port, credentials, discovery, maintenance, DNS, routing, and external-access options are managed in the dashboard and stored in SQLite.
+> The dashboard configures exactly ten things: admin username, password, management path, web port and external access; proxy username, password, port, enable switch and external access. Everything else — intervals, timeouts, concurrency, data sources — is a constant in the binary.
 
 للخوادم الصغيرة ضعيفة الإمكانات (مثل 1 نواة / 1G) يمكن تخفيض حِمل الفحص:
 
-Use the dashboard to lower probe concurrency, discovery limit, and initial test count.
+Tuning values — probe concurrency, discovery limit, check intervals, timeouts — are constants in the binary rather than settings, chosen to run on a 1-core / 1 GB box.
 
 ### ملخص API
 
@@ -247,7 +275,7 @@ GET    /api/v1/logs              GET  /api/v1/logs/export
 
 - **Go 1.23+**، وEcho v5 (الويب/API)، وsqlc + `modernc.org/sqlite` (Go خالص، دون CGO)، وgoose (ترحيلات مدمجة)، وcobra (CLI)، وlog/slog.
 - الواجهة الأمامية **React 19 + Vite + Tailwind v4 + Zustand**، وتُدمج مخرجات البناء داخل الثنائي عبر `//go:embed`.
-- تُجزّأ كلمات المرور بـ `scrypt`، مع مصادقة عبر مسار آمن عشوائي + كوكي الجلسة.
+- تُجزّأ كلمات المرور بـ `scrypt`، مع مصادقة عبر مسار آمن عشوائي + كوكي الجلسة. كما تُحفظ كلمة مرور الإدارة بصيغة قابلة للقراءة داخل قاعدة بيانات بصلاحيات `0600` يقرأها `root` فقط، ليتمكن `free-proxy credentials` من طباعتها (يتم التحقق عند تسجيل الدخول عبر البصمة دائمًا)؛ أما كلمة مرور البروكسي فتُحفظ كبصمة فقط.
 
 ### البناء من المصدر
 

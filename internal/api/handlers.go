@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/masteralanlab/free-proxy/internal/config"
 	"github.com/masteralanlab/free-proxy/internal/domain"
 	"github.com/masteralanlab/free-proxy/internal/security"
 	"github.com/masteralanlab/free-proxy/internal/store"
@@ -29,9 +30,17 @@ func (h *Handlers) Login(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
+	// Throttle before verifying, not after: verification is the expensive part
+	// (an scrypt derivation, ~16 MiB and tens of milliseconds), and this endpoint
+	// is reachable without a session.
+	client := c.RealIP()
+	if !h.Deps.Auth.Logins.Allow(client) {
+		return echo.NewHTTPError(http.StatusTooManyRequests, "Too many login attempts; try again in a minute")
+	}
 	if !h.Deps.Auth.Verify(req.Username, req.Password) {
 		return echo.NewHTTPError(http.StatusForbidden, "Incorrect username or password")
 	}
+	h.Deps.Auth.Logins.Reset(client)
 	token, err := h.Deps.Auth.Sessions.Create()
 	if err != nil {
 		return err
@@ -39,7 +48,7 @@ func (h *Handlers) Login(c *echo.Context) error {
 	c.SetCookie(&http.Cookie{
 		Name: "session", Value: token, Path: h.cookiePath(),
 		HttpOnly: true, SameSite: http.SameSiteLaxMode,
-		MaxAge: int(h.Deps.Cfg.SessionTTL().Seconds()),
+		MaxAge: int(config.SessionTTL.Seconds()),
 	})
 	return c.JSON(http.StatusOK, map[string]bool{"ok": true})
 }
@@ -84,15 +93,16 @@ func (h *Handlers) UpdateCredentials(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	prev := h.Deps.Auth.Store.Config()
-	hash := prev.PasswordHash
+	hash, plain := prev.PasswordHash, prev.Password
 	if req.Password != "" {
 		var err error
 		if hash, err = security.HashPassword(req.Password); err != nil {
 			return err
 		}
+		plain = req.Password
 	}
 	updated := security.AdminConfig{
-		Username: req.Username, PasswordHash: hash, SecretPath: req.SecretPath,
+		Username: req.Username, PasswordHash: hash, Password: plain, SecretPath: req.SecretPath,
 		Host: req.Host, Port: req.Port,
 		ProxyHost:         firstNonEmpty(req.ProxyHost, prev.ProxyHost),
 		ProxyPort:         firstNonZero(req.ProxyPort, prev.ProxyPort),
@@ -122,7 +132,7 @@ func (h *Handlers) cookiePath() string {
 
 func (h *Handlers) ListProxies(c *echo.Context) error {
 	limit := clampInt(queryInt(c, "limit", 100), 1, 500)
-	offset := maxInt(queryInt(c, "offset", 0), 0)
+	offset := max(queryInt(c, "offset", 0), 0)
 	// Every retained node is one the liveness sweep has not disproved, so the
 	// default list is the whole pool. listed_only narrows to the provider's
 	// newest published batch, which is a diagnostic view of the rotation rather
@@ -143,6 +153,22 @@ func (h *Handlers) ListProxies(c *echo.Context) error {
 		return err
 	}
 	return c.JSON(http.StatusOK, domain.ProxyNodePage{Items: items, Total: total, Limit: limit, Offset: offset})
+}
+
+// ListProxyCountries backs the console's country picker. It takes the same
+// filters as ListProxies minus the country itself, so the picker always shows
+// every country reachable from the current view, with its node counts.
+func (h *Handlers) ListProxyCountries(c *echo.Context) error {
+	filter := store.NodeFilter{
+		IPType: c.QueryParam("ip_type"), Status: c.QueryParam("status"),
+		FavoriteOnly: c.QueryParam("favorite") == "true",
+		ListedOnly:   c.QueryParam("listed_only") == "true",
+	}
+	items, err := h.Deps.Repos.Nodes.CountryCounts(c.Request().Context(), filter)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, map[string]any{"items": items})
 }
 
 func (h *Handlers) DiscoverProxies(c *echo.Context) error {
@@ -184,8 +210,8 @@ func (h *Handlers) ProbeMultiple(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusConflict, "Another network operation is running")
 	}
 	ids := dedupeNonEmpty(req.IDs)
-	if len(ids) > h.Deps.Cfg.ManualTestNodeLimit {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("At most %d nodes can be tested at once", h.Deps.Cfg.ManualTestNodeLimit))
+	if len(ids) > config.ManualTestNodeLimit {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("At most %d nodes can be tested at once", config.ManualTestNodeLimit))
 	}
 	job, err := h.Deps.Jobs.Submit(c.Request().Context(), "probe-proxies", h.Deps.Probe.ProbeManyJob(ids))
 	if err != nil {
@@ -391,12 +417,14 @@ func (h *Handlers) UpdateSystemConfig(c *echo.Context) error {
 		return err
 	}
 	s.Admin.PasswordHash = prev.Admin.PasswordHash
+	s.Admin.Password = prev.Admin.Password
 	s.Proxy.PasswordHash = prev.Proxy.PasswordHash
 	if req.AdminPassword != "" {
 		s.Admin.PasswordHash, err = security.HashPassword(req.AdminPassword)
 		if err != nil {
 			return err
 		}
+		s.Admin.Password = req.AdminPassword
 	}
 	if req.ProxyPassword != "" {
 		s.Proxy.PasswordHash, err = security.HashPassword(req.ProxyPassword)
@@ -412,8 +440,9 @@ func (h *Handlers) UpdateSystemConfig(c *echo.Context) error {
 	}
 	web, proxyExternal := s.Admin.WebExternalAccess, s.Proxy.ExternalAccess
 	admin := security.AdminConfig{
-		Username: s.Admin.Username, PasswordHash: s.Admin.PasswordHash, SecretPath: s.Admin.SecretPath,
-		Host: "0.0.0.0", Port: s.Admin.WebPort, ProxyHost: "0.0.0.0", ProxyPort: s.Proxy.Port,
+		Username: s.Admin.Username, PasswordHash: s.Admin.PasswordHash, Password: s.Admin.Password,
+		SecretPath: s.Admin.SecretPath,
+		Host:       "0.0.0.0", Port: s.Admin.WebPort, ProxyHost: "0.0.0.0", ProxyPort: s.Proxy.Port,
 		WebExternalAccess: &web, ProxyExternalAccess: &proxyExternal,
 	}
 	if err := h.Deps.Auth.Store.Update(admin); err != nil {
@@ -446,22 +475,8 @@ func validateSystemConfig(s domain.AppSettings) error {
 	if s.Admin.WebPort < 1 || s.Admin.WebPort > 65535 || s.Proxy.Port < 1 || s.Proxy.Port > 65535 {
 		return fmt.Errorf("端口范围需为 1-65535")
 	}
-	if s.Admin.SessionTTLSeconds < 60 || s.Proxy.MaxConnections < 1 || s.Discovery.DiscoveryLimit < 1 || s.Discovery.DiscoveryLimit > 1000 {
-		return fmt.Errorf("配置数值超出有效范围")
-	}
-	if s.Proxy.ConnectTimeoutSeconds <= 0 || s.Proxy.IdleTimeoutSeconds <= 0 || s.Discovery.RequestTimeoutSecs <= 0 || s.Maintenance.MaintenanceIntervalSeconds < 60 {
-		return fmt.Errorf("时间间隔需大于有效最小值")
-	}
-	if s.Maintenance.HealthCheckIntervalSeconds <= 0 || s.Maintenance.ActivePingIntervalSeconds <= 0 || s.Maintenance.DisconnectedRetrySeconds <= 0 ||
-		s.Maintenance.OpenVPNTestTimeoutSeconds <= 0 || s.Maintenance.OpenVPNConnectTimeoutSeconds <= 0 || s.Network.RoutingRetryIntervalSeconds <= 0 ||
-		s.Discovery.IPInfoCacheSeconds < 1 || s.Maintenance.InvalidBackoffSeconds < 1 || s.Maintenance.StaleNodeGraceSeconds < 1 {
-		return fmt.Errorf("检测、缓存、退避和重试时间需大于 0")
-	}
-	if s.Maintenance.MaxProbeConcurrency < 1 || s.Maintenance.InitialConnectTestLimit < 1 || s.Maintenance.ManualTestNodeLimit < 1 || s.Network.RoutingSetupRetries < 1 {
-		return fmt.Errorf("并发数、检测数和重试数需大于 0")
-	}
-	if s.Proxy.DNSServer == "" || s.Discovery.VPNGateAPIURL == "" || s.Discovery.IPInfoAPIURL == "" {
-		return fmt.Errorf("代理 DNS 和数据源地址为必填项")
+	if s.Admin.WebPort == s.Proxy.Port {
+		return fmt.Errorf("网页端口与代理端口不能相同")
 	}
 	return nil
 }
@@ -483,7 +498,7 @@ func (h *Handlers) SystemStatus(c *echo.Context) error {
 	}
 	op, waiting, _ := h.Deps.Coordinator.Snapshot()
 	return c.JSON(http.StatusOK, map[string]any{
-		"name":            h.Deps.Cfg.AppName,
+		"name":            config.AppName,
 		"version":         h.Deps.Version,
 		"environment":     h.Deps.Cfg.Environment,
 		"status":          "running",
@@ -539,19 +554,15 @@ func (h *Handlers) ExportLogs(c *echo.Context) error {
 
 func monitorPayload(state interface{ AsMap() map[string]any }) map[string]any {
 	m := state.AsMap()
-	healthy := m["last_heartbeat_at"] != nil && m["last_error"] == nil
-	out := map[string]any{"running": true, "status": statusWord(healthy)}
+	status := "degraded"
+	if m["last_heartbeat_at"] != nil && m["last_error"] == nil {
+		status = "healthy"
+	}
+	out := map[string]any{"running": true, "status": status}
 	for k, v := range m {
 		out[k] = v
 	}
 	return out
-}
-
-func statusWord(healthy bool) string {
-	if healthy {
-		return "healthy"
-	}
-	return "degraded"
 }
 
 func queryInt(c *echo.Context, name string, def int) int {
@@ -566,22 +577,7 @@ func queryInt(c *echo.Context, name string, def int) int {
 	return n
 }
 
-func clampInt(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
+func clampInt(v, lo, hi int) int { return min(max(v, lo), hi) }
 
 func dedupeNonEmpty(ids []string) []string {
 	seen := map[string]bool{}

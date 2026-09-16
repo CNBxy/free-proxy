@@ -33,32 +33,31 @@ const (
 func defaultEnvContent() string {
 	return `FREE_PROXY_ENVIRONMENT=production
 FREE_PROXY_DATA_DIR=` + DataDir + `
-FREE_PROXY_SQL_ECHO=false
 FREE_PROXY_ALLOW_PROCESS_RESTART=true
 FREE_PROXY_OPENVPN_COMMAND=openvpn
-FREE_PROXY_OPENVPN_USERNAME=vpn
-FREE_PROXY_OPENVPN_PASSWORD=vpn
 # Network identifiers below live in namespaces shared with every other program
 # on this host. They use a project-private prefix so free-proxy can coexist with
 # 3x-ui, WARP, and other tunnel managers. Change them only to resolve a conflict.
 FREE_PROXY_TUNNEL_INTERFACE=` + naming.ActiveDevice() + `
 FREE_PROXY_PROBE_DEVICE_PREFIX=` + naming.DevicePrefix + `
-FREE_PROXY_TEST_TUN_START=1
-FREE_PROXY_TEST_TUN_END=64
 FREE_PROXY_POLICY_ROUTING_TABLE=` + strconv.Itoa(naming.DefaultRoutingTable) + `
 `
 }
 
+// infrastructureEnvKeys is what may stay in the environment file: where this
+// install keeps its data, and the host-global names it claims. Everything else
+// is either owned by the web console (identity, ports, external access) or a
+// constant in internal/config — and a stale line for one of those would be a
+// value an operator reads as live.
 var infrastructureEnvKeys = map[string]bool{
 	"FREE_PROXY_ENVIRONMENT": true, "FREE_PROXY_DATA_DIR": true,
-	"FREE_PROXY_DATABASE_URL": true, "FREE_PROXY_SQL_ECHO": true,
+	"FREE_PROXY_DATABASE_URL":          true,
 	"FREE_PROXY_ALLOW_PROCESS_RESTART": true,
-	"FREE_PROXY_OPENVPN_COMMAND":       true, "FREE_PROXY_OPENVPN_USERNAME": true,
-	"FREE_PROXY_OPENVPN_PASSWORD": true, "FREE_PROXY_TUNNEL_INTERFACE": true,
-	"FREE_PROXY_PROBE_DEVICE_PREFIX": true,
-	"FREE_PROXY_TEST_TUN_START":      true, "FREE_PROXY_TEST_TUN_END": true,
-	"FREE_PROXY_POLICY_ROUTING_TABLE": true,
-	"FREE_PROXY_ENV_FILE":             true, "FREE_PROXY_REPO": true, "FREE_PROXY_RELEASE": true,
+	"FREE_PROXY_OPENVPN_COMMAND":       true,
+	"FREE_PROXY_TUNNEL_INTERFACE":      true,
+	"FREE_PROXY_PROBE_DEVICE_PREFIX":   true,
+	"FREE_PROXY_POLICY_ROUTING_TABLE":  true,
+	"FREE_PROXY_ENV_FILE":              true, "FREE_PROXY_REPO": true, "FREE_PROXY_RELEASE": true,
 }
 
 const systemdUnit = `[Unit]
@@ -192,13 +191,12 @@ func migrateLegacyNaming(envFile string) ([]string, error) {
 		}
 		return nil, err
 	}
+	// The probe device range used to be migrated here too. It is a constant now,
+	// and pruneDatabaseSettingsEnv drops the old keys, so there is nothing left
+	// to rewrite.
 	rewrites := map[string][2]string{
 		"FREE_PROXY_TUNNEL_INTERFACE":     {naming.LegacyTunnelInterface, naming.ActiveDevice()},
 		"FREE_PROXY_POLICY_ROUTING_TABLE": {strconv.Itoa(naming.LegacyRoutingTable), strconv.Itoa(naming.DefaultRoutingTable)},
-		// The old probe range started at 2 to stay clear of tun0/tun1; the
-		// private pool only needs to clear index 0.
-		"FREE_PROXY_TEST_TUN_START": {"2", "1"},
-		"FREE_PROXY_TEST_TUN_END":   {"99", "64"},
 	}
 
 	lines := strings.Split(string(data), "\n")

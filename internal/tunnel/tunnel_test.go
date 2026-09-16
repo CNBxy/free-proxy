@@ -154,10 +154,9 @@ func TestSplitCmdlinePreservesArgumentBoundaries(t *testing.T) {
 // the child its pid can be recycled, and we signal a whole process group.
 func TestStopAfterExitDoesNotSignal(t *testing.T) {
 	cfg := &config.Config{
-		OpenVPNCommand:            "true", // exits immediately
-		TunnelInterface:           naming.ActiveDevice(),
-		DataDir:                   t.TempDir(),
-		OpenVPNConnectTimeoutSecs: 2,
+		OpenVPNCommand:  "true", // exits immediately
+		TunnelInterface: naming.ActiveDevice(),
+		DataDir:         t.TempDir(),
 	}
 	m := NewManager(cfg)
 	_ = m.Connect(context.Background(), "n1", "remote 1.2.3.4 1194\n")
@@ -192,10 +191,9 @@ func TestBuildArgsVersionBranch(t *testing.T) {
 // return quickly; a hang means the deadlock is back.
 func TestConnectDoesNotDeadlock(t *testing.T) {
 	cfg := &config.Config{
-		OpenVPNCommand:            "true", // exits immediately, no real tunnel
-		TunnelInterface:           naming.ActiveDevice(),
-		DataDir:                   t.TempDir(),
-		OpenVPNConnectTimeoutSecs: 2,
+		OpenVPNCommand:  "true", // exits immediately, no real tunnel
+		TunnelInterface: naming.ActiveDevice(),
+		DataDir:         t.TempDir(),
 	}
 	m := NewManager(cfg)
 	done := make(chan struct{})

@@ -160,6 +160,34 @@ func TestStatisticsCountWholePool(t *testing.T) {
 	}
 }
 
+func TestStatisticsBreakdownsCountOnlyReadyNodes(t *testing.T) {
+	repos := newTestRepos(t)
+	ctx := context.Background()
+
+	provider := &fakeProvider{nodes: []domain.DiscoveredNode{disc("jp-1", "1.1.1.1"), disc("us-1", "2.2.2.2")}}
+	if _, err := NewDiscoveryService(provider, repos.Nodes).Discover(ctx); err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if _, err := repos.DB.ExecContext(ctx, `UPDATE proxy_nodes
+		SET status = 'ready', ip_type = 'residential', country = 'Japan' WHERE id = 'jp-1'`); err != nil {
+		t.Fatalf("classify jp-1: %v", err)
+	}
+	if _, err := repos.DB.ExecContext(ctx, `UPDATE proxy_nodes
+		SET status = 'unavailable', ip_type = 'residential', country = 'United States' WHERE id = 'us-1'`); err != nil {
+		t.Fatalf("classify us-1: %v", err)
+	}
+
+	stats, err := repos.Nodes.Statistics(ctx)
+	if err != nil {
+		t.Fatalf("statistics: %v", err)
+	}
+	// Total still describes the retained pool, but the tiles beside it must not
+	// advertise a node the sweep has already marked unavailable.
+	if stats.Total != 2 || stats.Ready != 1 || stats.Residential != 1 || stats.Countries != 1 {
+		t.Fatalf("statistics = %+v, want breakdowns limited to the one ready node", stats)
+	}
+}
+
 func TestFavoriteFilterIncludesRetainedHistory(t *testing.T) {
 	repos := newTestRepos(t)
 	ctx := context.Background()

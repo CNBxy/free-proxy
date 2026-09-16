@@ -14,9 +14,10 @@ import (
 
 // MaintenanceService runs the periodic discover→probe→(auto-connect) cycle.
 type MaintenanceService struct {
-	cfg          *config.Config
 	nodes        *store.NodeRepository
 	settingsRepo *store.SettingsRepository
+	probes       *store.ProbeResultRepository
+	jobs         *store.JobRepository
 	discovery    *DiscoveryService
 	probe        *ProbeService
 	pool         *ProxyPoolService
@@ -27,11 +28,13 @@ type MaintenanceService struct {
 }
 
 // NewMaintenanceService constructs a MaintenanceService.
-func NewMaintenanceService(cfg *config.Config, nodes *store.NodeRepository, settingsRepo *store.SettingsRepository,
+func NewMaintenanceService(nodes *store.NodeRepository, settingsRepo *store.SettingsRepository,
+	probes *store.ProbeResultRepository, jobs *store.JobRepository,
 	discovery *DiscoveryService, probe *ProbeService, pool *ProxyPoolService, gateway *GatewayService,
 	autoSwitch *AutoSwitchService, coordinator *Coordinator) *MaintenanceService {
 	return &MaintenanceService{
-		cfg: cfg, nodes: nodes, settingsRepo: settingsRepo, discovery: discovery, probe: probe,
+		nodes: nodes, settingsRepo: settingsRepo, probes: probes, jobs: jobs,
+		discovery: discovery, probe: probe,
 		pool: pool, gateway: gateway, autoSwitch: autoSwitch, coordinator: coordinator,
 	}
 }
@@ -61,6 +64,7 @@ func (m *MaintenanceService) run(ctx context.Context) (domain.MaintenanceResult,
 	defer m.mu.Unlock()
 	slog.Info("starting periodic maintenance", "module", "maintenance")
 	_ = m.nodes.ClearExpiredBlacklist(ctx)
+	m.pruneHistory(ctx)
 	// A provider fetch that fails must not cost the cycle its probe pass: probing
 	// reads the stored pool and does not need the provider to answer. Aborting
 	// here used to drop a whole 200-node pass over a transient network error.
@@ -74,7 +78,7 @@ func (m *MaintenanceService) run(ctx context.Context) (domain.MaintenanceResult,
 		slog.Warn("node discovery failed; probing the stored pool and skipping the stale purge",
 			"module", "maintenance", "err", err)
 	} else {
-		_, _ = m.nodes.PurgeStaleNodes(ctx, m.cfg.StaleNodeGrace())
+		_, _ = m.nodes.PurgeStaleNodes(ctx, config.StaleNodeGrace)
 	}
 
 	settings, err := m.settingsRepo.Get(ctx)
@@ -95,7 +99,7 @@ func (m *MaintenanceService) run(ctx context.Context) (domain.MaintenanceResult,
 		} else {
 			sort.SliceStable(candidates, func(i, j int) bool { return probeLess(candidates[i], candidates[j], settings) })
 		}
-		limit := m.cfg.InitialConnectTestLimit
+		limit := config.InitialConnectTestLimit
 		if limit > len(candidates) {
 			limit = len(candidates)
 		}
@@ -144,6 +148,30 @@ func (m *MaintenanceService) run(ctx context.Context) (domain.MaintenanceResult,
 		}
 	}
 	return m.result(ctx, discovery.Discovered, probed)
+}
+
+// pruneHistory enforces the retention window on the two append-only tables. It
+// rides the maintenance cycle because that is already the pass that spends time
+// on pool upkeep, and it is advisory: a cycle should not lose its probe pass
+// because a delete failed.
+func (m *MaintenanceService) pruneHistory(ctx context.Context) {
+	cutoff := time.Now().Add(-store.HistoryRetention)
+	var probes, jobs int64
+	if m.probes != nil {
+		var err error
+		if probes, err = m.probes.DeleteOlderThan(ctx, cutoff); err != nil {
+			slog.Warn("probe history prune failed", "module", "maintenance", "err", err)
+		}
+	}
+	if m.jobs != nil {
+		var err error
+		if jobs, err = m.jobs.DeleteOlderThan(ctx, cutoff); err != nil {
+			slog.Warn("job history prune failed", "module", "maintenance", "err", err)
+		}
+	}
+	if probes > 0 || jobs > 0 {
+		slog.Info("pruned expired history", "module", "maintenance", "probe_results", probes, "jobs", jobs)
+	}
 }
 
 // probeBudget caps how many nodes one maintenance cycle hands to the OpenVPN
@@ -248,15 +276,14 @@ func probeLess(a, b domain.ProxyNodeRead, settings domain.ProxySettings) bool {
 
 // MaintenanceMonitor runs maintenance on an interval, backing off when disconnected.
 type MaintenanceMonitor struct {
-	cfg         *config.Config
 	maintenance *MaintenanceService
 	gateway     *GatewayService
 	State       MonitorState
 }
 
 // NewMaintenanceMonitor constructs a MaintenanceMonitor.
-func NewMaintenanceMonitor(cfg *config.Config, maintenance *MaintenanceService, gateway *GatewayService) *MaintenanceMonitor {
-	return &MaintenanceMonitor{cfg: cfg, maintenance: maintenance, gateway: gateway}
+func NewMaintenanceMonitor(maintenance *MaintenanceService, gateway *GatewayService) *MaintenanceMonitor {
+	return &MaintenanceMonitor{maintenance: maintenance, gateway: gateway}
 }
 
 // Run loops until ctx is cancelled.
@@ -270,9 +297,9 @@ func (m *MaintenanceMonitor) Run(ctx context.Context) {
 			success = true
 			m.State.Heartbeat(true, "")
 		}
-		delay := m.cfg.MaintenanceInterval()
+		delay := config.MaintenanceInterval
 		if !success && m.gateway.Status().ActiveNodeID == nil {
-			delay = m.cfg.DisconnectedRetry()
+			delay = config.DisconnectedRetry
 		}
 		select {
 		case <-ctx.Done():
