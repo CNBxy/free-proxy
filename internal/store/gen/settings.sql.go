@@ -20,7 +20,7 @@ func (q *Queries) AddFavorite(ctx context.Context, nodeID string) error {
 }
 
 const getRuntimeSettings = `-- name: GetRuntimeSettings :one
-SELECT id, routing_mode, force_country, routing_ip_type, connection_enabled, fixed_node_id FROM runtime_settings WHERE id = 1
+SELECT id, routing_mode, force_country, routing_ip_type, connection_enabled, fixed_node_id, country_filters, priority_order FROM runtime_settings WHERE id = 1
 `
 
 func (q *Queries) GetRuntimeSettings(ctx context.Context) (RuntimeSetting, error) {
@@ -33,6 +33,8 @@ func (q *Queries) GetRuntimeSettings(ctx context.Context) (RuntimeSetting, error
 		&i.RoutingIpType,
 		&i.ConnectionEnabled,
 		&i.FixedNodeID,
+		&i.CountryFilters,
+		&i.PriorityOrder,
 	)
 	return i, err
 }
@@ -99,7 +101,9 @@ UPDATE runtime_settings SET
     force_country      = ?,
     routing_ip_type    = ?,
     connection_enabled = ?,
-    fixed_node_id      = ?
+    fixed_node_id      = ?,
+    country_filters    = ?,
+    priority_order     = ?
 WHERE id = 1
 `
 
@@ -109,6 +113,8 @@ type UpdateRuntimeSettingsParams struct {
 	RoutingIpType     string         `json:"routing_ip_type"`
 	ConnectionEnabled int64          `json:"connection_enabled"`
 	FixedNodeID       sql.NullString `json:"fixed_node_id"`
+	CountryFilters    string         `json:"country_filters"`
+	PriorityOrder     string         `json:"priority_order"`
 }
 
 func (q *Queries) UpdateRuntimeSettings(ctx context.Context, arg UpdateRuntimeSettingsParams) error {
@@ -118,6 +124,8 @@ func (q *Queries) UpdateRuntimeSettings(ctx context.Context, arg UpdateRuntimeSe
 		arg.RoutingIpType,
 		arg.ConnectionEnabled,
 		arg.FixedNodeID,
+		arg.CountryFilters,
+		arg.PriorityOrder,
 	)
 	return err
 }

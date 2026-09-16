@@ -102,6 +102,22 @@ export interface ProxySettings {
   connection_enabled: boolean;
   fixed_node_id: string | null;
   favorite_node_ids: string[];
+  country_filters: string[];
+  priority_order: PriorityOrder[];
+}
+
+export type PriorityMetric = "sessions" | "latency" | "ping" | "speed";
+
+export interface QualityBracket {
+  min: number;
+  max: number;
+  score: number;
+}
+
+export interface PriorityOrder {
+  metric: PriorityMetric;
+  weight: number;
+  quality_ms: QualityBracket[];
 }
 
 export interface Job {

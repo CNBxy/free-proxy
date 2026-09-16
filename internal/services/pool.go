@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"sort"
+	"strings"
 
 	"github.com/masteralanlab/free-proxy/internal/domain"
 	"github.com/masteralanlab/free-proxy/internal/store"
@@ -56,6 +57,10 @@ func ApplyFilters(nodes []domain.ProxyNodeRead, settings domain.ProxySettings, i
 	for _, id := range settings.FavoriteNodeIDs {
 		favorites[id] = true
 	}
+	countryFilter := map[string]bool{}
+	for _, code := range settings.CountryFilters {
+		countryFilter[strings.ToUpper(code)] = true
+	}
 	for _, n := range nodes {
 		switch settings.RoutingMode {
 		case domain.PolicyFixed:
@@ -70,6 +75,9 @@ func ApplyFilters(nodes []domain.ProxyNodeRead, settings domain.ProxySettings, i
 			if !favorites[n.ID] {
 				continue
 			}
+		}
+		if len(countryFilter) > 0 && !countryFilter[strings.ToUpper(n.CountryCode)] {
+			continue
 		}
 		switch settings.RoutingIPType {
 		case domain.RoutingResidential:
@@ -89,6 +97,10 @@ func ApplyFilters(nodes []domain.ProxyNodeRead, settings domain.ProxySettings, i
 
 // SortCandidates orders nodes by the effective selection key for settings.
 func SortCandidates(nodes []domain.ProxyNodeRead, settings domain.ProxySettings) {
+	if len(settings.PriorityOrder) > 0 {
+		SortCandidatesByPriority(nodes, settings.PriorityOrder)
+		return
+	}
 	if settings.RoutingMode == domain.PolicySmart {
 		sortSmartCandidates(nodes, false)
 		return
@@ -216,4 +228,62 @@ func lessFor(a, b domain.ProxyNodeRead, settings domain.ProxySettings) bool {
 		return a.SourceSpeedBPS > b.SourceSpeedBPS
 	}
 	return residentialRank(a) < residentialRank(b)
+}
+
+func scoreNode(n domain.ProxyNodeRead, priorities []domain.PriorityOrder) float64 {
+	totalScore := 0.0
+	for _, p := range priorities {
+		var rawValue float64
+		switch p.Metric {
+		case domain.PrioritySessions:
+			rawValue = float64(n.SourceSessions)
+		case domain.PriorityLatency:
+			if n.LatencyMS > 0 {
+				rawValue = float64(n.LatencyMS)
+			} else {
+				rawValue = 999999
+			}
+		case domain.PriorityPing:
+			if n.SourcePingMS > 0 {
+				rawValue = float64(n.SourcePingMS)
+			} else {
+				rawValue = 999999
+			}
+		case domain.PrioritySpeed:
+			if n.SourceSpeedBPS > 0 {
+				rawValue = float64(n.SourceSpeedBPS) / 1000000.0
+			} else {
+				rawValue = 0
+			}
+		}
+		qualityScore := findQualityScore(rawValue, p.QualityMS)
+		totalScore += p.Weight * qualityScore
+	}
+	return totalScore
+}
+
+func findQualityScore(value float64, brackets []domain.QualityBracket) float64 {
+	intVal := int(value)
+	for _, b := range brackets {
+		if intVal >= b.Min && intVal <= b.Max {
+			return b.Score
+		}
+	}
+	return 0
+}
+
+func SortCandidatesByPriority(nodes []domain.ProxyNodeRead, priorities []domain.PriorityOrder) {
+	if len(nodes) < 2 {
+		return
+	}
+	scores := make(map[string]float64, len(nodes))
+	for _, n := range nodes {
+		scores[n.ID] = scoreNode(n, priorities)
+	}
+	sort.SliceStable(nodes, func(i, j int) bool {
+		if scores[nodes[i].ID] != scores[nodes[j].ID] {
+			return scores[nodes[i].ID] > scores[nodes[j].ID]
+		}
+		return nodes[i].ID < nodes[j].ID
+	})
 }

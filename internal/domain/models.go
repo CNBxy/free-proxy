@@ -205,6 +205,8 @@ type ProxySettings struct {
 	ConnectionEnabled bool            `json:"connection_enabled"`
 	FixedNodeID       *string         `json:"fixed_node_id"`
 	FavoriteNodeIDs   []string        `json:"favorite_node_ids"`
+	CountryFilters    []string        `json:"country_filters"`
+	PriorityOrder     []PriorityOrder `json:"priority_order"`
 }
 
 type ProxySettingsUpdate struct {
@@ -213,6 +215,79 @@ type ProxySettingsUpdate struct {
 	RoutingIPType     RoutingIpType   `json:"routing_ip_type"`
 	ConnectionEnabled bool            `json:"connection_enabled"`
 	FixedNodeID       *string         `json:"fixed_node_id"`
+	CountryFilters    []string        `json:"country_filters"`
+	PriorityOrder     []PriorityOrder `json:"priority_order"`
+}
+
+// PriorityMetric identifies one dimension of node quality.
+type PriorityMetric string
+
+const (
+	PrioritySessions PriorityMetric = "sessions"
+	PriorityLatency  PriorityMetric = "latency"
+	PriorityPing     PriorityMetric = "ping"
+	PrioritySpeed    PriorityMetric = "speed"
+)
+
+// PriorityOrder is one ranking dimension with a weight and configurable quality
+// score ranges. The final node score is the sum of (weight × quality_score)
+// across all enabled priorities.
+type PriorityOrder struct {
+	Metric    PriorityMetric    `json:"metric"`
+	Weight    float64           `json:"weight"`
+	QualityMS []QualityBracket  `json:"quality_ms,omitempty"`
+}
+
+// QualityBracket maps a numeric range to a quality score.
+type QualityBracket struct {
+	Min    int     `json:"min"`
+	Max    int     `json:"max"`
+	Score  float64 `json:"score"`
+}
+
+// DefaultPriorityOrders returns the default priority configuration.
+func DefaultPriorityOrders() []PriorityOrder {
+	return []PriorityOrder{
+		{
+			Metric: PrioritySessions,
+			Weight: 0.55,
+			QualityMS: []QualityBracket{
+				{Min: 0, Max: 10, Score: 6},
+				{Min: 11, Max: 25, Score: 3},
+				{Min: 26, Max: 999999, Score: 2},
+			},
+		},
+		{
+			Metric: PriorityLatency,
+			Weight: 0.25,
+			QualityMS: []QualityBracket{
+				{Min: 0, Max: 10, Score: 10},
+				{Min: 11, Max: 50, Score: 5},
+				{Min: 51, Max: 999999, Score: -5},
+			},
+		},
+		{
+			Metric: PriorityPing,
+			Weight: 0.15,
+			QualityMS: []QualityBracket{
+				{Min: 0, Max: 20, Score: 12},
+				{Min: 21, Max: 50, Score: 8},
+				{Min: 51, Max: 100, Score: 6},
+				{Min: 101, Max: 200, Score: 4},
+				{Min: 201, Max: 999999, Score: -10},
+			},
+		},
+		{
+			Metric: PrioritySpeed,
+			Weight: 0.5,
+			QualityMS: []QualityBracket{
+				{Min: 200, Max: 999999, Score: 10},
+				{Min: 101, Max: 200, Score: 6},
+				{Min: 50, Max: 100, Score: 2},
+				{Min: 0, Max: 49, Score: -8},
+			},
+		},
+	}
 }
 
 type ProxyHealthResult struct {

@@ -85,6 +85,28 @@ func strToNS(s *string) sql.NullString {
 	return sql.NullString{String: *s, Valid: true}
 }
 
+func parseJSONStringArray(s string) ([]string, error) {
+	if s == "" || s == "[]" {
+		return []string{}, nil
+	}
+	var result []string
+	if err := json.Unmarshal([]byte(s), &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func parseJSONPriorityOrder(s string) ([]domain.PriorityOrder, error) {
+	if s == "" || s == "[]" {
+		return domain.DefaultPriorityOrders(), nil
+	}
+	var result []domain.PriorityOrder
+	if err := json.Unmarshal([]byte(s), &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // ---- node conversions -------------------------------------------------------
 
 func nodeToRead(n gen.ProxyNode) domain.ProxyNodeRead {
@@ -498,6 +520,14 @@ func (r *SettingsRepository) Get(ctx context.Context) (domain.ProxySettings, err
 	if err != nil {
 		return domain.ProxySettings{}, err
 	}
+	countryFilters, err := parseJSONStringArray(rs.CountryFilters)
+	if err != nil {
+		countryFilters = []string{}
+	}
+	priorityOrder, err := parseJSONPriorityOrder(rs.PriorityOrder)
+	if err != nil {
+		priorityOrder = domain.DefaultPriorityOrders()
+	}
 	return domain.ProxySettings{
 		RoutingMode:       domain.ProxyPolicyMode(rs.RoutingMode),
 		ForceCountry:      rs.ForceCountry,
@@ -505,17 +535,35 @@ func (r *SettingsRepository) Get(ctx context.Context) (domain.ProxySettings, err
 		ConnectionEnabled: i2b(rs.ConnectionEnabled),
 		FixedNodeID:       nsToStr(rs.FixedNodeID),
 		FavoriteNodeIDs:   favs,
+		CountryFilters:    countryFilters,
+		PriorityOrder:     priorityOrder,
 	}, nil
 }
 
 // Update applies a settings update (favorites unchanged).
 func (r *SettingsRepository) Update(ctx context.Context, u domain.ProxySettingsUpdate) error {
+	countryFiltersJSON := "[]"
+	if u.CountryFilters != nil {
+		b, err := json.Marshal(u.CountryFilters)
+		if err == nil {
+			countryFiltersJSON = string(b)
+		}
+	}
+	priorityOrderJSON := "[]"
+	if u.PriorityOrder != nil {
+		b, err := json.Marshal(u.PriorityOrder)
+		if err == nil {
+			priorityOrderJSON = string(b)
+		}
+	}
 	return r.q.UpdateRuntimeSettings(ctx, gen.UpdateRuntimeSettingsParams{
 		RoutingMode:       string(u.RoutingMode),
 		ForceCountry:      u.ForceCountry,
 		RoutingIpType:     string(u.RoutingIPType),
 		ConnectionEnabled: b2i(u.ConnectionEnabled),
 		FixedNodeID:       strToNS(u.FixedNodeID),
+		CountryFilters:    countryFiltersJSON,
+		PriorityOrder:     priorityOrderJSON,
 	})
 }
 

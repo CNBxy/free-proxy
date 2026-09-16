@@ -126,4 +126,6 @@ type RuntimeSetting struct {
 	RoutingIpType     string         `json:"routing_ip_type"`
 	ConnectionEnabled int64          `json:"connection_enabled"`
 	FixedNodeID       sql.NullString `json:"fixed_node_id"`
+	CountryFilters    string         `json:"country_filters"`
+	PriorityOrder     string         `json:"priority_order"`
 }

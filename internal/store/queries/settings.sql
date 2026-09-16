@@ -7,7 +7,9 @@ UPDATE runtime_settings SET
     force_country      = ?,
     routing_ip_type    = ?,
     connection_enabled = ?,
-    fixed_node_id      = ?
+    fixed_node_id      = ?,
+    country_filters    = ?,
+    priority_order     = ?
 WHERE id = 1;
 
 -- name: SetConnectionEnabled :exec
